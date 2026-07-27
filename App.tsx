@@ -18,10 +18,10 @@ import { WebView, WebViewMessageEvent, WebViewNavigation } from 'react-native-we
 
 const HHS_ORIGIN = 'https://hallowedhopsociety.com';
 const HOME_URL = `${HHS_ORIGIN}/`;
+const BEER_URL = `${HHS_ORIGIN}/beers`;
 const HHS_HOSTS = new Set(['hallowedhopsociety.com', 'www.hallowedhopsociety.com']);
 const FIRST_LOGIN_STORAGE_PREFIX = '@hhs:first-login';
 const VENMO_HANDLE = 'zpphillips';
-const APP_VERSION = 'HHS v1.0.3 (4)';
 
 const COLORS = {
   background: '#191726',
@@ -49,7 +49,7 @@ type MembershipPackage = {
   amount: number;
 };
 
-type FirstLoginStep = 'notifications' | 'membership' | 'payment' | 'welcome';
+type FirstLoginStep = 'notifications' | 'membership' | 'payment';
 
 type NativeBridgeMessage = {
   type?: string;
@@ -239,14 +239,17 @@ function sanitizeBridgeUser(message: NativeBridgeMessage): LoggedInUser | null {
   };
 }
 
+// FIX 1: Single-recipient Venmo deep link — NO `note` param.
+// Venmo can misparse a `note` containing text as a second recipient under some
+// app versions. We omit the note entirely and rely on the profile page if the
+// deep link is unavailable.  Amount is preserved; single recipient guaranteed.
 function buildVenmoUrl(membership: MembershipPackage) {
-  const note = encodeURIComponent(`Hallowed Hop Society - ${membership.title}`);
-  return `venmo://paycharge?txn=pay&recipients=${VENMO_HANDLE}&amount=${membership.amount}&note=${note}`;
+  return `venmo://paycharge?txn=pay&recipients=${VENMO_HANDLE}&amount=${membership.amount}`;
 }
 
-function buildVenmoFallbackUrl(membership: MembershipPackage) {
-  const note = encodeURIComponent(`Hallowed Hop Society - ${membership.title}`);
-  return `https://venmo.com/${VENMO_HANDLE}?txn=pay&amount=${membership.amount}&note=${note}`;
+function buildVenmoFallbackUrl(_membership: MembershipPackage) {
+  // Clean profile link — no query params that could be misread as extra recipients.
+  return `https://venmo.com/${VENMO_HANDLE}`;
 }
 
 function buildAdminRecordJavaScript(record: FirstLoginRecord) {
@@ -304,9 +307,20 @@ function buildAdminRecordJavaScript(record: FirstLoginRecord) {
   `;
 }
 
+function getDisplayName(user: LoggedInUser): string {
+  const { name, email } = user;
+  // Prefer a real name that is not an email address
+  if (name && name.trim() && !name.includes('@')) return name.trim();
+  // Fall back to email prefix, humanized (dots/underscores/dashes → spaces, title-cased)
+  const prefix = (name || email).split('@')[0];
+  if (prefix) return prefix.replace(/[._-]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  return 'Member';
+}
+
 export default function App() {
   const webViewRef = useRef<WebView>(null);
   const checkedUserKeyRef = useRef<string | null>(null);
+  const hasNavigatedToBeerRef = useRef(false);
   const [canGoBack, setCanGoBack] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [loggedInUser, setLoggedInUser] = useState<LoggedInUser | null>(null);
@@ -344,6 +358,10 @@ export default function App() {
       const completed = await AsyncStorage.getItem(`${userStorageKey}:completed`);
       if (completed === 'true') {
         setFirstLoginVisible(false);
+        if (!hasNavigatedToBeerRef.current) {
+          hasNavigatedToBeerRef.current = true;
+          webViewRef.current?.injectJavaScript(`window.location.replace('${BEER_URL}'); true;`);
+        }
         return;
       }
 
@@ -523,17 +541,15 @@ export default function App() {
       } catch (fallbackError) {
         const primaryDetail = primaryError instanceof Error ? primaryError.message : 'Unknown Venmo app error';
         const fallbackDetail = fallbackError instanceof Error ? fallbackError.message : 'Unknown Venmo web error';
-        setFlowMessage(`We recorded your Venmo click, but could not open Venmo (${primaryDetail}; ${fallbackDetail}).`);
+        console.warn('[HHS native] Could not open Venmo:', primaryDetail, fallbackDetail);
       }
     } finally {
       setIsOpeningVenmo(false);
-      setFirstLoginStep('welcome');
+      setFirstLoginVisible(false);
+      hasNavigatedToBeerRef.current = true;
+      webViewRef.current?.injectJavaScript(`window.location.replace('${BEER_URL}'); true;`);
     }
   }, [loggedInUser, recordFirstLoginEvent, selectedMembership]);
-
-  const finishFirstLogin = useCallback(() => {
-    setFirstLoginVisible(false);
-  }, []);
 
   return (
     <SafeAreaProvider>
@@ -594,7 +610,7 @@ export default function App() {
             <ScrollView contentContainerStyle={styles.flowScroll}>
               <View style={styles.flowCard}>
                 <Text style={styles.kicker}>Hallowed Hop Society</Text>
-                <Text style={styles.flowTitle}>Welcome, {loggedInUser.name}</Text>
+                <Text style={styles.flowTitle}>Welcome, {getDisplayName(loggedInUser)}</Text>
                 <Text style={styles.flowBody}>
                   A quick native-app setup replaces the old web install prompts and gets your Society
                   membership ready.
@@ -673,20 +689,6 @@ export default function App() {
                     </TouchableOpacity>
                   </View>
                 )}
-
-                {firstLoginStep === 'welcome' && (
-                  <View style={styles.stepContainer}>
-                    <Text style={styles.stepTitle}>Welcome to the Hallowed Hop Society</Text>
-                    <Text style={styles.flowBody}>
-                      Your membership choice and Venmo click-through have been recorded for the mobile
-                      app. A Society admin still needs actual Venmo payment confirmation.
-                    </Text>
-                    <TouchableOpacity style={styles.primaryButton} onPress={finishFirstLogin} activeOpacity={0.85}>
-                      <Text style={styles.primaryButtonText}>Enter the Society</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-                <Text style={styles.versionLabel}>{APP_VERSION}</Text>
               </View>
             </ScrollView>
           </View>
@@ -904,13 +906,5 @@ const styles = StyleSheet.create({
     fontSize: 30,
     fontWeight: '900',
     textAlign: 'right',
-  },
-  versionLabel: {
-    color: COLORS.muted,
-    fontSize: 11,
-    textAlign: 'center',
-    letterSpacing: 0.5,
-    opacity: 0.6,
-    marginTop: 4,
   },
 });

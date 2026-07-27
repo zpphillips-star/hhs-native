@@ -9,7 +9,9 @@
     "web": "expo start --web"
   },
   "dependencies": {
+    "@react-native-async-storage/async-storage": "2.2.0",
     "expo": "~54.0.35",
+    "expo-notifications": "~0.32.17",
     "expo-status-bar": "~3.0.9",
     "expo-system-ui": "~6.0.9",
     "react": "19.1.0",
