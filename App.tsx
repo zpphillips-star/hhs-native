@@ -21,6 +21,7 @@ const HOME_URL = `${HHS_ORIGIN}/`;
 const HHS_HOSTS = new Set(['hallowedhopsociety.com', 'www.hallowedhopsociety.com']);
 const FIRST_LOGIN_STORAGE_PREFIX = '@hhs:first-login';
 const VENMO_HANDLE = 'zpphillips';
+const APP_VERSION = 'HHS v1.0.3 (4)';
 
 const COLORS = {
   background: '#191726',
@@ -95,7 +96,9 @@ const MEMBERSHIP_PACKAGES: MembershipPackage[] = [
 const injectedJavaScriptBeforeContentLoaded = `
   (function () {
     try {
-      window.ReactNativeWebView && (window.__HHS_NATIVE_APP__ = true);
+      // Mark this context as the HHS native app — unconditionally, so the web app
+      // can check window.__HHS_NATIVE_APP__ before ReactNativeWebView is bridged.
+      window.__HHS_NATIVE_APP__ = true;
       var meta = document.querySelector('meta[name="viewport"]') || document.createElement('meta');
       meta.name = 'viewport';
       meta.content = 'width=device-width, initial-scale=1, viewport-fit=cover';
@@ -109,7 +112,8 @@ const injectedJavaScriptBeforeContentLoaded = `
 
 const hhsNativeBridgeJavaScript = `
   (function () {
-    var installPromptPattern = /(download|add\\s+to\\s+(your\\s+)?phone|save\\s+to\\s+home\\s+screen|install\\s+(the\\s+)?app|getting\\s+started)/i;
+    // Extended pattern: also covers "Add to Home Screen" heading and "add this app to your Home Screen"
+    var installPromptPattern = /(download|add\\s+to\\s+(your\\s+)?phone|add\\s+to\\s+(your\\s+)?home\\s+screen|save\\s+to\\s+home\\s+screen|install\\s+(the\\s+)?app|getting\\s+started|setup\\s+required|enable\\s+notifications)/i;
 
     function ensureNativeStyles() {
       var styleId = 'hhs-native-hide-web-onboarding';
@@ -178,6 +182,9 @@ const hhsNativeBridgeJavaScript = `
 
     try {
       window.__HHS_NATIVE_APP__ = true;
+      // Persist the native-app flag in localStorage so the web app can also check
+      // it synchronously before any async auth/Supabase calls complete.
+      try { localStorage.setItem('__hhs_native_app__', '1'); } catch (_) {}
       hideWebInstallPrompts();
       postLoggedInUser();
       if (!window.__HHS_NATIVE_BRIDGE_INSTALLED__) {
@@ -679,6 +686,7 @@ export default function App() {
                     </TouchableOpacity>
                   </View>
                 )}
+                <Text style={styles.versionLabel}>{APP_VERSION}</Text>
               </View>
             </ScrollView>
           </View>
@@ -896,5 +904,13 @@ const styles = StyleSheet.create({
     fontSize: 30,
     fontWeight: '900',
     textAlign: 'right',
+  },
+  versionLabel: {
+    color: COLORS.muted,
+    fontSize: 11,
+    textAlign: 'center',
+    letterSpacing: 0.5,
+    opacity: 0.6,
+    marginTop: 4,
   },
 });
