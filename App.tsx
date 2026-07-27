@@ -1,359 +1,220 @@
-import React from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
+  BackHandler,
+  Linking,
+  Platform,
   StyleSheet,
   Text,
-  View,
   TouchableOpacity,
-  Linking,
-  Image,
-  ScrollView,
+  View,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { NavigationContainer } from '@react-navigation/native';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { WebView } from 'react-native-webview';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { WebView, WebViewNavigation } from 'react-native-webview';
+
+const HHS_ORIGIN = 'https://hallowedhopsociety.com';
+const HOME_URL = `${HHS_ORIGIN}/`;
+const HHS_HOSTS = new Set(['hallowedhopsociety.com', 'www.hallowedhopsociety.com']);
 
 const COLORS = {
-  background: '#1a0a00',
-  surface: '#2d1a00',
-  accent: '#d4870a',
-  accentLight: '#f0a832',
-  text: '#f5e6c8',
-  textMuted: '#a07840',
-  tabBar: '#0f0600',
-  tabBarBorder: '#3d2200',
+  background: '#191726',
+  card: '#201d30',
+  text: '#d9d8d2',
+  muted: '#7a7468',
+  gold: '#d97c2b',
+  border: 'rgba(217, 124, 43, 0.18)',
 };
 
-// ─── Home Screen ────────────────────────────────────────────────────────────
-function HomeScreen() {
-  const openWebsite = () => {
-    Linking.openURL('https://hallowedhopsociety.com');
-  };
+const injectedJavaScriptBeforeContentLoaded = `
+  (function () {
+    try {
+      window.ReactNativeWebView && (window.__HHS_NATIVE_APP__ = true);
+      var meta = document.querySelector('meta[name="viewport"]') || document.createElement('meta');
+      meta.name = 'viewport';
+      meta.content = 'width=device-width, initial-scale=1, viewport-fit=cover';
+      if (!meta.parentNode) document.head.appendChild(meta);
+    } catch (error) {}
+  })();
+  true;
+`;
 
-  return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <StatusBar style="light" />
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.homeContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Header / Branding */}
-        <View style={styles.heroSection}>
-          <View style={styles.emblemContainer}>
-            <Text style={styles.emblemIcon}>🍺</Text>
-          </View>
-          <Text style={styles.brandTitle}>HALLOWED HOP</Text>
-          <Text style={styles.brandSubtitle}>SOCIETY</Text>
-          <View style={styles.divider} />
-          <Text style={styles.tagline}>Curating the craft. Celebrating the pour.</Text>
-        </View>
-
-        {/* Welcome Card */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Welcome, Fellow Hop Head</Text>
-          <Text style={styles.cardBody}>
-            Hallowed Hop Society is your guide to the best craft breweries,
-            taprooms, and beer experiences. Discover hidden gems, track your
-            favorites, and join a community of passionate beer lovers.
-          </Text>
-        </View>
-
-        {/* Action Button */}
-        <TouchableOpacity style={styles.primaryButton} onPress={openWebsite} activeOpacity={0.8}>
-          <Text style={styles.primaryButtonText}>🗺  View Breweries</Text>
-        </TouchableOpacity>
-
-        {/* Feature Cards */}
-        <View style={styles.featureGrid}>
-          <View style={styles.featureCard}>
-            <Text style={styles.featureIcon}>🏆</Text>
-            <Text style={styles.featureTitle}>Top Picks</Text>
-            <Text style={styles.featureDesc}>Editor-curated brewery selections</Text>
-          </View>
-          <View style={styles.featureCard}>
-            <Text style={styles.featureIcon}>📍</Text>
-            <Text style={styles.featureTitle}>Nearby</Text>
-            <Text style={styles.featureDesc}>Find breweries close to you</Text>
-          </View>
-          <View style={styles.featureCard}>
-            <Text style={styles.featureIcon}>⭐</Text>
-            <Text style={styles.featureTitle}>Reviews</Text>
-            <Text style={styles.featureDesc}>Community ratings & tasting notes</Text>
-          </View>
-          <View style={styles.featureCard}>
-            <Text style={styles.featureIcon}>🎉</Text>
-            <Text style={styles.featureTitle}>Events</Text>
-            <Text style={styles.featureDesc}>Tap takeovers & beer fests</Text>
-          </View>
-        </View>
-
-        <Text style={styles.footer}>© 2024 Hallowed Hop Society</Text>
-      </ScrollView>
-    </SafeAreaView>
-  );
+function isInternalUrl(url: string) {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' && HHS_HOSTS.has(parsed.hostname);
+  } catch {
+    return false;
+  }
 }
-
-// ─── Breweries Screen ────────────────────────────────────────────────────────
-function BreweriesScreen() {
-  return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <StatusBar style="light" />
-      <View style={styles.webviewHeader}>
-        <Text style={styles.webviewHeaderTitle}>🍻  Breweries</Text>
-      </View>
-      <WebView
-        source={{ uri: 'https://hallowedhopsociety.com' }}
-        style={styles.webview}
-        startInLoadingState
-        renderLoading={() => (
-          <View style={styles.loadingContainer}>
-            <Text style={styles.loadingText}>Loading Breweries…</Text>
-          </View>
-        )}
-      />
-    </SafeAreaView>
-  );
-}
-
-// ─── Tab Navigator ───────────────────────────────────────────────────────────
-const Tab = createBottomTabNavigator();
 
 export default function App() {
+  const webViewRef = useRef<WebView>(null);
+  const [canGoBack, setCanGoBack] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (canGoBack) {
+        webViewRef.current?.goBack();
+        return true;
+      }
+      return false;
+    });
+
+    return () => subscription.remove();
+  }, [canGoBack]);
+
+  const handleNavigationStateChange = useCallback((navState: WebViewNavigation) => {
+    setCanGoBack(navState.canGoBack);
+  }, []);
+
+  const handleShouldStartLoad = useCallback((request: { url: string }) => {
+    const { url } = request;
+
+    if (
+      url === 'about:blank' ||
+      url.startsWith('data:') ||
+      url.startsWith('blob:') ||
+      isInternalUrl(url)
+    ) {
+      return true;
+    }
+
+    Linking.openURL(url).catch(() => undefined);
+    return false;
+  }, []);
+
+  const retry = useCallback(() => {
+    setLoadFailed(false);
+    webViewRef.current?.reload();
+  }, []);
+
   return (
-    <NavigationContainer>
-      <Tab.Navigator
-        screenOptions={{
-          headerShown: false,
-          tabBarStyle: styles.tabBar,
-          tabBarActiveTintColor: COLORS.accent,
-          tabBarInactiveTintColor: COLORS.textMuted,
-          tabBarLabelStyle: styles.tabLabel,
-        }}
-      >
-        <Tab.Screen
-          name="Home"
-          component={HomeScreen}
-          options={{
-            tabBarLabel: 'Home',
-            tabBarIcon: ({ color }) => (
-              <Text style={{ fontSize: 20, color }}>🏠</Text>
-            ),
+    <SafeAreaProvider>
+      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+        <StatusBar style="light" backgroundColor={COLORS.background} />
+        <WebView
+          ref={webViewRef}
+          source={{ uri: HOME_URL }}
+          style={styles.webView}
+          containerStyle={styles.webViewContainer}
+          originWhitelist={['https://*', 'mailto:*', 'tel:*']}
+          injectedJavaScriptBeforeContentLoaded={injectedJavaScriptBeforeContentLoaded}
+          javaScriptEnabled
+          domStorageEnabled
+          sharedCookiesEnabled
+          thirdPartyCookiesEnabled
+          setSupportMultipleWindows={false}
+          javaScriptCanOpenWindowsAutomatically
+          mediaPlaybackRequiresUserAction={false}
+          allowsFullscreenVideo
+          geolocationEnabled
+          pullToRefreshEnabled
+          startInLoadingState
+          onNavigationStateChange={handleNavigationStateChange}
+          onShouldStartLoadWithRequest={handleShouldStartLoad}
+          onLoadStart={() => setLoadFailed(false)}
+          onError={() => setLoadFailed(true)}
+          onHttpError={({ nativeEvent }) => {
+            if (nativeEvent.statusCode >= 500) setLoadFailed(true);
           }}
+          renderLoading={() => (
+            <View style={styles.loading}>
+              <ActivityIndicator color={COLORS.gold} size="large" />
+              <Text style={styles.loadingText}>Summoning the Society…</Text>
+            </View>
+          )}
         />
-        <Tab.Screen
-          name="Breweries"
-          component={BreweriesScreen}
-          options={{
-            tabBarLabel: 'Breweries',
-            tabBarIcon: ({ color }) => (
-              <Text style={{ fontSize: 20, color }}>🍺</Text>
-            ),
-          }}
-        />
-      </Tab.Navigator>
-    </NavigationContainer>
+
+        {loadFailed && (
+          <View style={styles.errorOverlay}>
+            <View style={styles.errorCard}>
+              <Text style={styles.errorTitle}>Hallowed Hop Society</Text>
+              <Text style={styles.errorBody}>
+                The Society could not be reached. Check your connection and try again.
+              </Text>
+              <TouchableOpacity style={styles.retryButton} onPress={retry} activeOpacity={0.85}>
+                <Text style={styles.retryButtonText}>Try Again</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+      </SafeAreaView>
+    </SafeAreaProvider>
   );
 }
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  safeArea: {
+  container: {
     flex: 1,
     backgroundColor: COLORS.background,
   },
-  scrollView: {
+  webViewContainer: {
     flex: 1,
     backgroundColor: COLORS.background,
   },
-  homeContent: {
-    paddingBottom: 40,
+  webView: {
+    flex: 1,
+    backgroundColor: COLORS.background,
   },
-
-  // Hero
-  heroSection: {
-    alignItems: 'center',
-    paddingTop: 40,
-    paddingBottom: 32,
-    paddingHorizontal: 24,
-  },
-  emblemContainer: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: COLORS.surface,
-    borderWidth: 3,
-    borderColor: COLORS.accent,
+  loading: {
+    ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 20,
-    shadowColor: COLORS.accent,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.6,
-    shadowRadius: 20,
-    elevation: 10,
-  },
-  emblemIcon: {
-    fontSize: 48,
-  },
-  brandTitle: {
-    fontSize: 32,
-    fontWeight: '900',
-    color: COLORS.accent,
-    letterSpacing: 6,
-    textAlign: 'center',
-  },
-  brandSubtitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: COLORS.accentLight,
-    letterSpacing: 10,
-    textAlign: 'center',
-    marginTop: 2,
-  },
-  divider: {
-    width: 80,
-    height: 2,
-    backgroundColor: COLORS.accent,
-    marginVertical: 16,
-    borderRadius: 1,
-  },
-  tagline: {
-    fontSize: 14,
-    color: COLORS.textMuted,
-    textAlign: 'center',
-    fontStyle: 'italic',
-    letterSpacing: 0.5,
-  },
-
-  // Card
-  card: {
-    backgroundColor: COLORS.surface,
-    marginHorizontal: 20,
-    marginBottom: 20,
-    padding: 20,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: COLORS.tabBarBorder,
-  },
-  cardTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: COLORS.text,
-    marginBottom: 10,
-  },
-  cardBody: {
-    fontSize: 14,
-    color: COLORS.textMuted,
-    lineHeight: 22,
-  },
-
-  // Primary Button
-  primaryButton: {
-    backgroundColor: COLORS.accent,
-    marginHorizontal: 20,
-    marginBottom: 28,
-    paddingVertical: 16,
-    borderRadius: 14,
-    alignItems: 'center',
-    shadowColor: COLORS.accent,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
-    shadowRadius: 12,
-    elevation: 8,
-  },
-  primaryButtonText: {
-    color: '#1a0a00',
-    fontSize: 17,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-
-  // Feature Grid
-  featureGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingHorizontal: 12,
-    marginBottom: 24,
-  },
-  featureCard: {
-    width: '46%',
-    backgroundColor: COLORS.surface,
-    margin: '2%',
-    padding: 16,
-    borderRadius: 14,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.tabBarBorder,
-  },
-  featureIcon: {
-    fontSize: 28,
-    marginBottom: 8,
-  },
-  featureTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: COLORS.text,
-    marginBottom: 4,
-  },
-  featureDesc: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    textAlign: 'center',
-    lineHeight: 16,
-  },
-
-  footer: {
-    textAlign: 'center',
-    color: COLORS.textMuted,
-    fontSize: 12,
-    marginTop: 8,
-  },
-
-  // Tab Bar
-  tabBar: {
-    backgroundColor: COLORS.tabBar,
-    borderTopColor: COLORS.tabBarBorder,
-    borderTopWidth: 1,
-    height: 60,
-    paddingBottom: 8,
-  },
-  tabLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-
-  // WebView
-  webviewHeader: {
-    backgroundColor: COLORS.surface,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.tabBarBorder,
-  },
-  webviewHeaderTitle: {
-    color: COLORS.accent,
-    fontSize: 17,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  webview: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  loadingContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
+    gap: 14,
     backgroundColor: COLORS.background,
   },
   loadingText: {
-    color: COLORS.textMuted,
-    fontSize: 16,
+    color: COLORS.text,
+    fontSize: 17,
+    letterSpacing: 0.8,
+  },
+  errorOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    backgroundColor: COLORS.background,
+  },
+  errorCard: {
+    width: '100%',
+    maxWidth: 420,
+    padding: 24,
+    borderRadius: 16,
+    backgroundColor: COLORS.card,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  errorTitle: {
+    color: COLORS.gold,
+    fontSize: 24,
+    fontWeight: '700',
+    letterSpacing: 1,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  errorBody: {
+    color: COLORS.text,
+    fontSize: 17,
+    lineHeight: 25,
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  retryButton: {
+    alignItems: 'center',
+    borderRadius: 10,
+    backgroundColor: COLORS.gold,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+  },
+  retryButtonText: {
+    color: COLORS.background,
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
   },
 });
