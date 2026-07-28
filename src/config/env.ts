@@ -18,3 +18,6 @@ export const SUPABASE_ANON_KEY =
 
 export const isSupabaseEnvConfigured = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 
+// Controlled native migration flag. Keep the WebView as the default app surface
+// until a native route/shell is intentionally enabled for validation.
+export const USE_NATIVE_BEER_SCREEN = env.EXPO_PUBLIC_HHS_NATIVE_BEER_SCREEN === '1';
