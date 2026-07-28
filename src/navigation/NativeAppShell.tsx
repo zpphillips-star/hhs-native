@@ -4,6 +4,7 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { USE_NATIVE_BEER_SCREEN } from '../config/env';
 import { AuthProvider } from '../features/auth/AuthProvider';
 import { NativeBeerScreen } from '../features/beers/NativeBeerScreen';
+import { NativeAccountSettingsScreen } from '../features/settings/NativeAccountSettingsScreen';
 
 type NativeTabId = 'beer' | 'wall' | 'rankings' | 'feedback' | 'menu';
 
@@ -47,13 +48,15 @@ export function NativeAppShell({ fallback }: NativeAppShellProps) {
       {/*
         The native tab foundation is intentionally opt-in behind
         EXPO_PUBLIC_HHS_NATIVE_BEER_SCREEN=1. Native Beer is the only first-class
-        native route here; Wall, Rankings, Feedback, and Menu remain WebView
+        native routes here; Wall, Rankings, and Feedback remain WebView
         fallbacks until their native data/side-effect parity is implemented.
       */}
       <View style={styles.shell}>
         <View style={styles.content} key={`${selectedRoute.id}:${activeWebPath ?? 'native'}`}>
           {showingNativeBeer ? (
             <NativeBeerScreen onOpenWebFallback={() => setWebFallbackPath('/beers')} />
+          ) : selectedRoute.id === 'menu' && !webFallbackPath ? (
+            <NativeAccountSettingsScreen onOpenWebFallback={(path) => setWebFallbackPath(path ?? '/')} />
           ) : (
             fallback(activeWebPath)
           )}
