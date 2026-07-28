@@ -5,6 +5,7 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -13,11 +14,19 @@ import {
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import { HHS_WEB_ORIGIN } from '../../config/env';
+import {
+  getCurrentPushPermissionStatus,
+  registerDeviceForPushNotifications,
+  unregisterCachedPushToken,
+  type PushPermissionStatus,
+} from '../notifications/pushRegistrationService';
 import { useAuth } from '../auth/AuthProvider';
 import {
+  applyNotificationPreferenceToggle,
   DEFAULT_NOTIFICATION_PREFERENCES,
   fetchCurrentUserProfile,
   fetchNotificationPreferences,
+  saveNotificationPreferences,
   type HhsProfile,
   type NotificationPreferences,
 } from './accountSettingsService';
@@ -29,6 +38,7 @@ const COLORS = {
   text: '#d9d8d2',
   muted: '#a69d8d',
   gold: '#d97c2b',
+  goldDark: '#9f561c',
   danger: '#e57373',
   border: 'rgba(217, 124, 43, 0.18)',
   borderStrong: 'rgba(217, 124, 43, 0.45)',
@@ -62,20 +72,25 @@ type PreferenceRowProps = {
   description: string;
   enabled: boolean;
   indented?: boolean;
+  disabled?: boolean;
+  onValueChange: (value: boolean) => void;
 };
 
-function PreferenceRow({ label, description, enabled, indented }: PreferenceRowProps) {
+function PreferenceRow({ label, description, enabled, indented, disabled, onValueChange }: PreferenceRowProps) {
   return (
     <View style={[styles.preferenceRow, indented && styles.preferenceRowIndented]}>
       <View style={styles.preferenceText}>
         <Text style={styles.preferenceLabel}>{label}</Text>
         <Text style={styles.preferenceDescription}>{description}</Text>
       </View>
-      <View style={[styles.readOnlyPill, enabled ? styles.readOnlyPillOn : styles.readOnlyPillOff]}>
-        <Text style={[styles.readOnlyPillText, enabled ? styles.readOnlyPillTextOn : styles.readOnlyPillTextOff]}>
-          {enabled ? 'On' : 'Off'}
-        </Text>
-      </View>
+      <Switch
+        disabled={disabled}
+        ios_backgroundColor={COLORS.cardAlt}
+        onValueChange={onValueChange}
+        thumbColor={enabled ? COLORS.gold : COLORS.muted}
+        trackColor={{ false: COLORS.cardAlt, true: COLORS.goldDark }}
+        value={enabled}
+      />
     </View>
   );
 }
@@ -92,6 +107,11 @@ export function NativeAccountSettingsScreen({ onOpenWebFallback }: NativeAccount
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
+  const [prefSavingKey, setPrefSavingKey] = useState<keyof NotificationPreferences | null>(null);
+  const [prefError, setPrefError] = useState<string | null>(null);
+  const [pushStatus, setPushStatus] = useState<PushPermissionStatus>('unknown');
+  const [pushMessage, setPushMessage] = useState<string | null>(null);
+  const [registeringPush, setRegisteringPush] = useState(false);
 
   const displayName = useMemo(() => getDisplayName(profile, user?.email), [profile, user?.email]);
 
@@ -100,6 +120,9 @@ export function NativeAccountSettingsScreen({ onOpenWebFallback }: NativeAccount
       setProfile(null);
       setPrefs(DEFAULT_NOTIFICATION_PREFERENCES);
       setDetailsError(null);
+      setPrefError(null);
+      setPushMessage(null);
+      setPushStatus('unknown');
       setLoadingDetails(false);
       setRefreshing(false);
       return;
@@ -119,6 +142,9 @@ export function NativeAccountSettingsScreen({ onOpenWebFallback }: NativeAccount
       ]);
       setProfile(nextProfile);
       setPrefs(nextPrefs);
+      setPrefError(null);
+      const nextPushStatus = await getCurrentPushPermissionStatus();
+      setPushStatus(nextPushStatus);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not load account details.';
       setDetailsError(message);
@@ -131,6 +157,43 @@ export function NativeAccountSettingsScreen({ onOpenWebFallback }: NativeAccount
   useEffect(() => {
     void loadAccountDetails();
   }, [loadAccountDetails]);
+
+  const handleRegisterPush = useCallback(async () => {
+    if (!user?.id || registeringPush) return;
+
+    setRegisteringPush(true);
+    setPushMessage(null);
+
+    const result = await registerDeviceForPushNotifications(
+      { id: user.id, email: profile?.email ?? user.email },
+      { requestPermission: true },
+    );
+
+    setPushStatus(result.status);
+    setPushMessage(result.message);
+    setRegisteringPush(false);
+  }, [profile?.email, registeringPush, user?.email, user?.id]);
+
+  const handlePreferenceChange = useCallback(
+    async (key: keyof NotificationPreferences, value: boolean) => {
+      if (!user?.id || prefSavingKey) return;
+
+      const nextPrefs = applyNotificationPreferenceToggle(prefs, key, value);
+      setPrefSavingKey(key);
+      setPrefError(null);
+
+      try {
+        await saveNotificationPreferences(user.id, profile?.email ?? user.email, nextPrefs);
+        setPrefs(nextPrefs);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Could not save notification preferences.';
+        setPrefError(message);
+      } finally {
+        setPrefSavingKey(null);
+      }
+    },
+    [prefSavingKey, prefs, profile?.email, user?.email, user?.id],
+  );
 
   const handleSignIn = async () => {
     if (signingIn || !email.trim() || !password) return;
@@ -152,6 +215,14 @@ export function NativeAccountSettingsScreen({ onOpenWebFallback }: NativeAccount
     if (signingOut) return;
 
     setSigningOut(true);
+    if (user?.id) {
+      const cleanup = await unregisterCachedPushToken({ id: user.id, email: profile?.email ?? user.email });
+      if (!cleanup.ok) {
+        setDetailsError(`Push token cleanup failed: ${cleanup.message}`);
+        setSigningOut(false);
+        return;
+      }
+    }
     const result = await signOut();
     setSigningOut(false);
 
@@ -250,45 +321,82 @@ export function NativeAccountSettingsScreen({ onOpenWebFallback }: NativeAccount
 
       <View style={styles.card}>
         <Text style={styles.sectionKicker}>Notifications</Text>
-        <Text style={styles.cardTitle}>Preference Snapshot</Text>
+        <Text style={styles.cardTitle}>Notification Settings</Text>
         <Text style={styles.bodyText}>
-          Read-only for this foundation step. The social master preference is shown as a select-all
-          snapshot; each child category keeps its own meaning.
+          Manage native push registration and the same saved preferences used by the web app. All Social
+          is a select-all helper; each child category still controls its own notification type.
         </Text>
+        <View style={styles.pushStatusBox}>
+          <Text style={styles.infoLabel}>Push Device</Text>
+          <Text style={styles.infoValue}>
+            {pushStatus === 'granted'
+              ? 'System permission granted'
+              : pushStatus === 'denied'
+                ? 'System permission denied'
+                : pushStatus === 'undetermined'
+                  ? 'Permission not requested'
+                  : 'Permission status unknown'}
+          </Text>
+          {pushMessage ? <Text style={styles.helperText}>{pushMessage}</Text> : null}
+          <TouchableOpacity
+            activeOpacity={0.85}
+            disabled={registeringPush}
+            onPress={() => void handleRegisterPush()}
+            style={[styles.primaryButton, registeringPush && styles.buttonDisabled]}
+          >
+            <Text style={styles.primaryButtonText}>
+              {registeringPush ? 'Registering...' : pushStatus === 'granted' ? 'Register This Device' : 'Enable Push Notifications'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+        {prefError ? <Text style={styles.errorText}>{prefError}</Text> : null}
         <PreferenceRow
+          disabled={Boolean(prefSavingKey)}
           enabled={prefs.daily_beer}
           label="Daily Beer"
           description="Daily October beer reminders."
+          onValueChange={(value) => void handlePreferenceChange('daily_beer', value)}
         />
         <PreferenceRow
+          disabled={Boolean(prefSavingKey)}
           enabled={prefs.social_all}
           label="All Social Notifications"
-          description="Master select-all value saved by the web settings flow."
+          description="Turn all four social notification categories on or off together."
+          onValueChange={(value) => void handlePreferenceChange('social_all', value)}
         />
         <PreferenceRow
+          disabled={Boolean(prefSavingKey)}
           enabled={prefs.social_new_comment}
           indented
           label="New Comment"
           description="Someone comments on any post."
+          onValueChange={(value) => void handlePreferenceChange('social_new_comment', value)}
         />
         <PreferenceRow
+          disabled={Boolean(prefSavingKey)}
           enabled={prefs.social_new_reaction}
           indented
           label="New Reaction"
           description="Someone reacts to any post."
+          onValueChange={(value) => void handlePreferenceChange('social_new_reaction', value)}
         />
         <PreferenceRow
+          disabled={Boolean(prefSavingKey)}
           enabled={prefs.social_reaction_to_your_items}
           indented
           label="Reaction to Your Items"
           description="Someone reacts to your post."
+          onValueChange={(value) => void handlePreferenceChange('social_reaction_to_your_items', value)}
         />
         <PreferenceRow
+          disabled={Boolean(prefSavingKey)}
           enabled={prefs.social_comment_on_your_items}
           indented
           label="Comment on Your Items"
           description="Someone comments on your post."
+          onValueChange={(value) => void handlePreferenceChange('social_comment_on_your_items', value)}
         />
+        {prefSavingKey ? <Text style={styles.settingsSavingText}>Saving notification preferences…</Text> : null}
       </View>
 
       <View style={styles.card}>
@@ -482,6 +590,14 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     lineHeight: 20,
   },
+  pushStatusBox: {
+    backgroundColor: COLORS.cardAlt,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 10,
+    padding: 13,
+  },
   warningBox: {
     backgroundColor: COLORS.cardAlt,
     borderColor: COLORS.borderStrong,
@@ -595,6 +711,12 @@ const styles = StyleSheet.create({
     color: COLORS.muted,
     fontSize: 13,
     lineHeight: 18,
+  },
+  settingsSavingText: {
+    color: COLORS.gold,
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
   },
   readOnlyPill: {
     borderRadius: 999,

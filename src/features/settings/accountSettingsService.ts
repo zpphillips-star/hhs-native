@@ -33,6 +33,47 @@ export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
   social_comment_on_your_items: true,
 };
 
+export const SOCIAL_NOTIFICATION_KEYS: (keyof Pick<
+  NotificationPreferences,
+  | 'social_new_comment'
+  | 'social_new_reaction'
+  | 'social_reaction_to_your_items'
+  | 'social_comment_on_your_items'
+>)[] = [
+  'social_new_comment',
+  'social_new_reaction',
+  'social_reaction_to_your_items',
+  'social_comment_on_your_items',
+];
+
+export function applyNotificationPreferenceToggle(
+  currentPrefs: NotificationPreferences,
+  key: keyof NotificationPreferences,
+  value: boolean,
+): NotificationPreferences {
+  if (key === 'social_all') {
+    return {
+      ...currentPrefs,
+      social_all: value,
+      social_new_comment: value,
+      social_new_reaction: value,
+      social_reaction_to_your_items: value,
+      social_comment_on_your_items: value,
+    };
+  }
+
+  const nextPrefs = {
+    ...currentPrefs,
+    [key]: value,
+  };
+
+  if (key !== 'daily_beer') {
+    nextPrefs.social_all = SOCIAL_NOTIFICATION_KEYS.every((socialKey) => nextPrefs[socialKey]);
+  }
+
+  return nextPrefs;
+}
+
 export async function fetchCurrentUserProfile(userId: string): Promise<HhsProfile | null> {
   if (!supabase) {
     throw new Error('Supabase public env is not configured for the native app.');
@@ -76,4 +117,34 @@ export async function fetchNotificationPreferences(userId: string): Promise<Noti
     ...DEFAULT_NOTIFICATION_PREFERENCES,
     ...(json.prefs ?? {}),
   };
+}
+
+export async function saveNotificationPreferences(
+  userId: string,
+  email: string | null | undefined,
+  prefs: NotificationPreferences,
+): Promise<void> {
+  const response = await fetch(`${HHS_WEB_ORIGIN}/api/notification-preferences`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      user_id: userId,
+      email: email ?? undefined,
+      ...prefs,
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Notification preferences save failed (${response.status}).`);
+  }
+
+  const json = (await response.json()) as {
+    ok?: boolean;
+    error?: string;
+  };
+
+  if (!json.ok) {
+    throw new Error(json.error ?? 'Notification preferences save was not successful.');
+  }
 }
