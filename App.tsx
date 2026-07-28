@@ -204,6 +204,48 @@ const hhsNativeBridgeJavaScript = `
       }
     }
 
+    // ── Hamburger injection fallback ─────────────────────────────────────────
+    // If the deployed web app has not yet updated its Nav (stale build),
+    // the Members Only link or Sign Out button will still appear.  This
+    // fallback detects that situation and replaces the auth slot with a
+    // styled hamburger that posts HHS_OPEN_MENU to the native bridge.
+    // It is idempotent: if the web already rendered [aria-label="Open menu"]
+    // we leave it alone.
+    function ensureNativeHamburger() {
+      try {
+        var nav = document.querySelector('nav');
+        if (!nav) return;
+        // Web app already rendered the hamburger — nothing to do
+        if (nav.querySelector('button[aria-label="Open menu"]')) return;
+        // Find the Members Only link or Sign Out button
+        var authEl = null;
+        var candidates = nav.querySelectorAll('a[href="/auth"], button');
+        for (var ci = 0; ci < candidates.length; ci++) {
+          var ctext = (candidates[ci].textContent || '').trim();
+          if (ctext === 'Members Only' || ctext === 'Sign Out') {
+            authEl = candidates[ci];
+            break;
+          }
+        }
+        if (!authEl || !authEl.parentNode) return;
+        // Build a hamburger button that matches the HHS gold style
+        var btn = document.createElement('button');
+        btn.setAttribute('aria-label', 'Open menu');
+        btn.style.cssText = 'display:flex;flex-direction:column;gap:5px;background:none;border:none;cursor:pointer;padding:4px 2px;align-items:center;justify-content:center;';
+        for (var bi = 0; bi < 3; bi++) {
+          var bar = document.createElement('span');
+          bar.style.cssText = 'display:block;width:20px;height:2px;background:var(--gold,#d97c2b);border-radius:1px;';
+          btn.appendChild(bar);
+        }
+        btn.addEventListener('click', function () {
+          try { window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'HHS_OPEN_MENU' })); } catch (e) {}
+        });
+        authEl.parentNode.replaceChild(btn, authEl);
+      } catch (hErr) {
+        console.warn('[HHS native] hamburger injection failed', hErr);
+      }
+    }
+
     try {
       window.__HHS_NATIVE_APP__ = true;
       // Persist the native-app flag in localStorage so the web app can also check
@@ -213,6 +255,7 @@ const hhsNativeBridgeJavaScript = `
       try { localStorage.setItem('hhs_setup_done', '1'); } catch (_) {}
       hideWebInstallPrompts();
       postLoggedInUser();
+      ensureNativeHamburger();
       if (!window.__HHS_NATIVE_BRIDGE_INSTALLED__) {
         window.__HHS_NATIVE_BRIDGE_INSTALLED__ = true;
         var attempts = 0;
@@ -220,11 +263,13 @@ const hhsNativeBridgeJavaScript = `
           attempts += 1;
           hideWebInstallPrompts();
           postLoggedInUser();
+          ensureNativeHamburger();
           if (attempts >= 30) window.clearInterval(intervalId);
         }, 2000);
         var observer = new MutationObserver(function () {
           hideWebInstallPrompts();
           postLoggedInUser();
+          ensureNativeHamburger();
         });
         observer.observe(document.documentElement, { childList: true, subtree: true });
       }
@@ -767,19 +812,19 @@ export default function App() {
         };
       } else {
         newPrefs = { ...notifPrefs, [key]: value };
-        // If any individual social toggle is turned on, ensure master is also on
-        if (value && key !== 'daily_beer') {
-          newPrefs.social_all = true;
-        }
-        // If all individual social toggles are now off, turn master off too
-        const socialKeys: (keyof NotifPrefs)[] = [
-          'social_new_comment',
-          'social_new_reaction',
-          'social_reaction_to_your_items',
-          'social_comment_on_your_items',
-        ];
-        if (!value && key !== 'daily_beer') {
-          const anyOn = socialKeys.some(k => k !== key && newPrefs[k]);
+        // Recompute social_all: true only when ALL four social children are enabled.
+        // Toggling one child on does NOT automatically set All Social on.
+        if (key !== 'daily_beer') {
+          const socialKeys: (keyof NotifPrefs)[] = [
+            'social_new_comment',
+            'social_new_reaction',
+            'social_reaction_to_your_items',
+            'social_comment_on_your_items',
+          ];
+          const allOn = socialKeys.every(k => newPrefs[k]);
+          const anyOn = socialKeys.some(k => newPrefs[k]);
+          newPrefs.social_all = allOn;
+          // If all are off, ensure social_all is also off
           if (!anyOn) newPrefs.social_all = false;
         }
       }
@@ -864,7 +909,7 @@ export default function App() {
                   )}
 
                   {/* Version footer — helps confirm the installed build */}
-                  <Text style={styles.menuVersionFooter}>HHS v1.0.13 (14)</Text>
+                  <Text style={styles.menuVersionFooter}>HHS v1.0.15 (16)</Text>
                 </View>
               </TouchableWithoutFeedback>
             </View>
@@ -953,7 +998,7 @@ export default function App() {
                         <View style={styles.settingsRow}>
                           <View style={styles.settingsRowText}>
                             <Text style={styles.settingsRowLabel}>New Comment</Text>
-                            <Text style={styles.settingsRowSub}>When someone comments on a post you follow</Text>
+                            <Text style={styles.settingsRowSub}>When someone comments on any post</Text>
                           </View>
                           <Switch
                             value={notifPrefs.social_new_comment}
@@ -967,7 +1012,7 @@ export default function App() {
                         <View style={styles.settingsRow}>
                           <View style={styles.settingsRowText}>
                             <Text style={styles.settingsRowLabel}>New Reaction</Text>
-                            <Text style={styles.settingsRowSub}>When someone reacts to a post you follow</Text>
+                            <Text style={styles.settingsRowSub}>When someone reacts to any post</Text>
                           </View>
                           <Switch
                             value={notifPrefs.social_new_reaction}
