@@ -29,7 +29,8 @@ const COLORS = {
 };
 
 type NativeBeerScreenProps = {
-  onOpenWebFallback: () => void;
+  mode?: 'calendar' | 'yourBeer';
+  onOpenWebFallback: (path?: string) => void;
 };
 
 function formatBeerMeta(beer: Beer) {
@@ -52,7 +53,7 @@ function getCountdownText(now: Date) {
   return `${days} days · ${hours} hrs`;
 }
 
-export function NativeBeerScreen({ onOpenWebFallback }: NativeBeerScreenProps) {
+export function NativeBeerScreen({ mode = 'calendar', onOpenWebFallback }: NativeBeerScreenProps) {
   const { user } = useAuth();
   const [beers, setBeers] = useState<Beer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,6 +64,10 @@ export function NativeBeerScreen({ onOpenWebFallback }: NativeBeerScreenProps) {
   const [ratingLoading, setRatingLoading] = useState(false);
   const [ratingSaving, setRatingSaving] = useState(false);
   const [ratingError, setRatingError] = useState<string | null>(null);
+  const [todayRating, setTodayRating] = useState<BeerRating | null>(null);
+  const [todayRatingLoading, setTodayRatingLoading] = useState(false);
+  const [todayRatingSaving, setTodayRatingSaving] = useState(false);
+  const [todayRatingError, setTodayRatingError] = useState<string | null>(null);
 
   const now = useMemo(() => new Date(), []);
   const isOctober = now.getMonth() === 9;
@@ -126,6 +131,36 @@ export function NativeBeerScreen({ onOpenWebFallback }: NativeBeerScreenProps) {
     void loadSelectedRating(selectedBeer, user?.id);
   }, [loadSelectedRating, selectedBeer, user?.id]);
 
+  useEffect(() => {
+    setTodayRating(null);
+    setTodayRatingError(null);
+
+    if (mode !== 'yourBeer' || !todayBeer || !user?.id) {
+      setTodayRatingLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setTodayRatingLoading(true);
+    fetchUserBeerRating(user.id, todayBeer.id)
+      .then((rating) => {
+        if (!cancelled) setTodayRating(rating);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          const message = err instanceof Error ? err.message : 'Could not load your rating.';
+          setTodayRatingError(message);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setTodayRatingLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, todayBeer, user?.id]);
+
   const openBeerDetail = (beer: Beer) => {
     setSelectedBeer(beer);
   };
@@ -153,7 +188,96 @@ export function NativeBeerScreen({ onOpenWebFallback }: NativeBeerScreenProps) {
     }
   };
 
-  const renderToday = () => {
+  const handleRateTodayBeer = async (stars: number) => {
+    if (!user || !todayBeer || todayRatingSaving) return;
+
+    setTodayRatingSaving(true);
+    setTodayRatingError(null);
+    try {
+      const rating = await upsertUserBeerRating(user.id, todayBeer.id, stars);
+      setTodayRating(rating);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not save your rating.';
+      setTodayRatingError(message);
+    } finally {
+      setTodayRatingSaving(false);
+    }
+  };
+
+  const renderRatingPanel = ({
+    errorMessage,
+    loadingRating,
+    onRate,
+    rating,
+    savingRating,
+  }: {
+    errorMessage: string | null;
+    loadingRating: boolean;
+    onRate: (stars: number) => void;
+    rating: BeerRating | null;
+    savingRating: boolean;
+  }) => (
+    <View style={styles.ratingCard}>
+      <Text style={styles.factLabel}>{rating ? 'Your Rating' : 'Rate This Beer'}</Text>
+      {user ? (
+        <>
+          {loadingRating ? (
+            <View style={styles.ratingLoadingRow}>
+              <ActivityIndicator color={COLORS.gold} />
+              <Text style={styles.ratingHelpText}>Loading your rating...</Text>
+            </View>
+          ) : (
+            <View style={styles.starRow}>
+              {[1, 2, 3, 4, 5].map((star) => {
+                const active = star <= (rating?.stars ?? 0);
+                return (
+                  <TouchableOpacity
+                    key={star}
+                    style={[styles.starButton, active && styles.starButtonActive]}
+                    onPress={() => onRate(star)}
+                    activeOpacity={0.8}
+                    disabled={savingRating}
+                  >
+                    <Text style={[styles.starText, active && styles.starTextActive]}>★</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+          {savingRating ? <Text style={styles.ratingHelpText}>Saving...</Text> : null}
+          {errorMessage ? <Text style={styles.ratingErrorText}>{errorMessage}</Text> : null}
+        </>
+      ) : (
+        <Text style={styles.ratingHelpText}>Sign in from The Settings tab or web view to rate this beer.</Text>
+      )}
+    </View>
+  );
+
+  const renderCalendarIntro = () => {
+    if (!isOctober) {
+      return (
+        <View style={styles.heroCard}>
+          <Text style={styles.kicker}>The Calendar Is Being Set</Text>
+          <Text style={styles.countdown}>{getCountdownText(now)}</Text>
+          <Text style={styles.bodyText}>
+            Every October, the Society convenes. Thirty-one days. Thirty-one beers. The 2026 calendar
+            remains veiled until the ritual begins.
+          </Text>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.heroCard}>
+        <Text style={styles.kicker}>October {year}</Text>
+        <Text style={styles.bodyText}>
+          Revealed beers are visible through today. Future pours stay hidden until their day arrives.
+        </Text>
+      </View>
+    );
+  };
+
+  const renderYourBeer = () => {
     if (isOctober && !todayBeer) {
       return (
         <View style={styles.messageCard}>
@@ -165,11 +289,11 @@ export function NativeBeerScreen({ onOpenWebFallback }: NativeBeerScreenProps) {
     if (!isOctober || !todayBeer) {
       return (
         <View style={styles.heroCard}>
-          <Text style={styles.kicker}>The Calendar Is Being Set</Text>
+          <Text style={styles.kicker}>Your Beer Awaits</Text>
           <Text style={styles.countdown}>{getCountdownText(now)}</Text>
           <Text style={styles.bodyText}>
-            Every October, the Society convenes. Thirty-one days. Thirty-one beers. The calendar
-            isn&apos;t set yet — but the 31 slots below are reserved.
+            Today&apos;s beer becomes the center ritual when October begins. Until then, the circle is
+            gathering and the taps remain under wraps.
           </Text>
         </View>
       );
@@ -187,9 +311,6 @@ export function NativeBeerScreen({ onOpenWebFallback }: NativeBeerScreenProps) {
         <Text style={styles.breweryTitle}>{todayBeer.brewery}</Text>
         {meta ? <Text style={styles.metaText}>{meta}</Text> : null}
         {todayBeer.description ? <Text style={styles.descriptionText}>{todayBeer.description}</Text> : null}
-        <TouchableOpacity style={styles.detailButton} onPress={() => openBeerDetail(todayBeer)} activeOpacity={0.85}>
-          <Text style={styles.detailButtonText}>View Details</Text>
-        </TouchableOpacity>
         {(todayBeer.beer_fact || todayBeer.brewery_fact) ? (
           <View style={styles.factCard}>
             {todayBeer.beer_fact ? (
@@ -207,6 +328,26 @@ export function NativeBeerScreen({ onOpenWebFallback }: NativeBeerScreenProps) {
             ) : null}
           </View>
         ) : null}
+        {renderRatingPanel({
+          errorMessage: todayRatingError,
+          loadingRating: todayRatingLoading,
+          onRate: (stars) => void handleRateTodayBeer(stars),
+          rating: todayRating,
+          savingRating: todayRatingSaving,
+        })}
+        <View style={styles.actionGrid}>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => onOpenWebFallback('/wall')}
+            style={styles.detailButton}
+          >
+            <Text style={styles.detailButtonText}>Open The Wall</Text>
+          </TouchableOpacity>
+          <View style={styles.placeholderAction}>
+            <Text style={styles.placeholderActionTitle}>Check-In</Text>
+            <Text style={styles.placeholderActionText}>Native wall posts and check-ins are planned for a later pass.</Text>
+          </View>
+        </View>
       </View>
     );
   };
@@ -312,40 +453,13 @@ export function NativeBeerScreen({ onOpenWebFallback }: NativeBeerScreenProps) {
                 </View>
               ) : null}
 
-              <View style={styles.ratingCard}>
-                <Text style={styles.factLabel}>{selectedRating ? 'Your Rating' : 'Rate This Beer'}</Text>
-                {user ? (
-                  <>
-                    {ratingLoading ? (
-                      <View style={styles.ratingLoadingRow}>
-                        <ActivityIndicator color={COLORS.gold} />
-                        <Text style={styles.ratingHelpText}>Loading your rating...</Text>
-                      </View>
-                    ) : (
-                      <View style={styles.starRow}>
-                        {[1, 2, 3, 4, 5].map((star) => {
-                          const active = star <= (selectedRating?.stars ?? 0);
-                          return (
-                            <TouchableOpacity
-                              key={star}
-                              style={[styles.starButton, active && styles.starButtonActive]}
-                              onPress={() => void handleRateSelectedBeer(star)}
-                              activeOpacity={0.8}
-                              disabled={ratingSaving}
-                            >
-                              <Text style={[styles.starText, active && styles.starTextActive]}>★</Text>
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </View>
-                    )}
-                    {ratingSaving ? <Text style={styles.ratingHelpText}>Saving...</Text> : null}
-                    {ratingError ? <Text style={styles.ratingErrorText}>{ratingError}</Text> : null}
-                  </>
-                ) : (
-                  <Text style={styles.ratingHelpText}>Sign in on the web view to rate this beer.</Text>
-                )}
-              </View>
+              {renderRatingPanel({
+                errorMessage: ratingError,
+                loadingRating: ratingLoading,
+                onRate: (stars) => void handleRateSelectedBeer(stars),
+                rating: selectedRating,
+                savingRating: ratingSaving,
+              })}
             </ScrollView>
           </View>
         </View>
@@ -371,9 +485,13 @@ export function NativeBeerScreen({ onOpenWebFallback }: NativeBeerScreenProps) {
           <View style={styles.header}>
             <View>
               <Text style={styles.appKicker}>Hallowed Hop Society</Text>
-              <Text style={styles.headerTitle}>Beers</Text>
+              <Text style={styles.headerTitle}>{mode === 'calendar' ? 'The Calendar' : 'Your Beer'}</Text>
             </View>
-            <TouchableOpacity style={styles.webFallbackButton} onPress={onOpenWebFallback} activeOpacity={0.8}>
+            <TouchableOpacity
+              style={styles.webFallbackButton}
+              onPress={() => onOpenWebFallback('/beers')}
+              activeOpacity={0.8}
+            >
               <Text style={styles.webFallbackText}>Web</Text>
             </TouchableOpacity>
           </View>
@@ -396,14 +514,18 @@ export function NativeBeerScreen({ onOpenWebFallback }: NativeBeerScreenProps) {
           ) : null}
 
           {!loading && !error ? (
-            <>
-              {renderToday()}
-              <View style={styles.calendarHeader}>
-                <Text style={styles.calendarTitle}>October {year}</Text>
-                <View style={styles.calendarRule} />
-              </View>
-              {renderList()}
-            </>
+            mode === 'calendar' ? (
+              <>
+                {renderCalendarIntro()}
+                <View style={styles.calendarHeader}>
+                  <Text style={styles.calendarTitle}>October {year}</Text>
+                  <View style={styles.calendarRule} />
+                </View>
+                {renderList()}
+              </>
+            ) : (
+              renderYourBeer()
+            )
           ) : null}
         </ScrollView>
         {renderDetailModal()}
@@ -599,6 +721,28 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 1.4,
     textTransform: 'uppercase',
+  },
+  actionGrid: {
+    gap: 12,
+    marginTop: 14,
+  },
+  placeholderAction: {
+    backgroundColor: COLORS.cardAlt,
+    borderColor: COLORS.border,
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 16,
+  },
+  placeholderActionTitle: {
+    color: COLORS.text,
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  placeholderActionText: {
+    color: COLORS.muted,
+    fontSize: 13,
+    lineHeight: 19,
   },
   factCard: {
     backgroundColor: COLORS.card,

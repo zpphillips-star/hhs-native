@@ -417,6 +417,18 @@ export function NativeAccountSettingsScreen({ onOpenWebFallback }: NativeAccount
     </>
   );
 
+  const renderAboutHhs = () => (
+    <View style={styles.card}>
+      <Text style={styles.sectionKicker}>About HHS</Text>
+      <Text style={styles.cardTitle}>The Society of the Sip</Text>
+      <Text style={styles.bodyText}>
+        The Hallowed Hop Society is an annual October ritual: 31 unique beers in 31 haunted days.
+        Each year brings a new theme, a new lineup, and a fellowship gathered around the sacred pour.
+      </Text>
+      <Text style={styles.quoteText}>Through ritual we pour, through hops we unite.</Text>
+    </View>
+  );
+
   return (
     <SafeAreaProvider>
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -437,7 +449,7 @@ export function NativeAccountSettingsScreen({ onOpenWebFallback }: NativeAccount
           <View style={styles.header}>
             <View>
               <Text style={styles.appKicker}>Hallowed Hop Society</Text>
-              <Text style={styles.headerTitle}>Account</Text>
+              <Text style={styles.headerTitle}>The Settings</Text>
             </View>
             <TouchableOpacity activeOpacity={0.8} onPress={() => onOpenWebFallback()} style={styles.webFallbackButton}>
               <Text style={styles.webFallbackText}>Web</Text>
@@ -461,7 +473,12 @@ export function NativeAccountSettingsScreen({ onOpenWebFallback }: NativeAccount
             </View>
           ) : null}
 
-          {!authLoading && !loadingDetails ? (user ? renderSignedIn() : renderSignedOut()) : null}
+          {!authLoading && !loadingDetails ? (
+            <>
+              {user ? renderSignedIn() : renderSignedOut()}
+              {renderAboutHhs()}
+            </>
+          ) : null}
 
           <Text style={styles.footerNote}>{HHS_WEB_ORIGIN.replace('https://', '')}</Text>
         </ScrollView>
@@ -589,6 +606,16 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontStyle: 'italic',
     lineHeight: 20,
+  },
+  quoteText: {
+    borderLeftColor: COLORS.gold,
+    borderLeftWidth: 3,
+    color: COLORS.text,
+    fontSize: 15,
+    fontStyle: 'italic',
+    fontWeight: '700',
+    lineHeight: 23,
+    paddingLeft: 14,
   },
   pushStatusBox: {
     backgroundColor: COLORS.cardAlt,
