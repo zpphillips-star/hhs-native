@@ -30,19 +30,9 @@ import {
   type HhsProfile,
   type NotificationPreferences,
 } from './accountSettingsService';
+import { HHS_COLORS, HHS_STYLES, HHS_TYPOGRAPHY } from '../../theme/hhsTheme';
 
-const COLORS = {
-  background: '#191726',
-  card: '#201d30',
-  cardAlt: '#28233a',
-  text: '#d9d8d2',
-  muted: '#a69d8d',
-  gold: '#d97c2b',
-  goldDark: '#9f561c',
-  danger: '#e57373',
-  border: 'rgba(217, 124, 43, 0.18)',
-  borderStrong: 'rgba(217, 124, 43, 0.45)',
-};
+const COLORS = HHS_COLORS;
 
 type NativeAccountSettingsScreenProps = {
   onOpenWebFallback: (path?: string) => void;
@@ -503,6 +493,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   appKicker: {
+    ...HHS_TYPOGRAPHY.kicker,
     color: COLORS.gold,
     fontSize: 11,
     fontWeight: '700',
@@ -511,18 +502,20 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   headerTitle: {
+    ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
     fontSize: 34,
     fontWeight: '700',
   },
   webFallbackButton: {
     borderColor: COLORS.borderStrong,
-    borderRadius: 999,
+    borderRadius: HHS_STYLES.pillRadius,
     borderWidth: 1,
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
   webFallbackText: {
+    ...HHS_TYPOGRAPHY.button,
     color: COLORS.gold,
     fontSize: 12,
     fontWeight: '700',
@@ -540,6 +533,7 @@ const styles = StyleSheet.create({
     padding: 28,
   },
   loadingText: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.gold,
     fontSize: 15,
   },
@@ -552,12 +546,14 @@ const styles = StyleSheet.create({
     padding: 18,
   },
   errorTitle: {
+    ...HHS_TYPOGRAPHY.display,
     color: COLORS.gold,
     fontSize: 18,
     fontWeight: '700',
     marginBottom: 8,
   },
   errorText: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.danger,
     fontSize: 14,
     lineHeight: 21,
@@ -566,11 +562,12 @@ const styles = StyleSheet.create({
   retryButton: {
     alignSelf: 'flex-start',
     backgroundColor: COLORS.gold,
-    borderRadius: 10,
+    borderRadius: HHS_STYLES.buttonRadius,
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
   retryButtonText: {
+    ...HHS_TYPOGRAPHY.button,
     color: COLORS.background,
     fontSize: 13,
     fontWeight: '700',
@@ -578,13 +575,14 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: COLORS.card,
     borderColor: COLORS.border,
-    borderRadius: 16,
+    borderRadius: HHS_STYLES.cardRadius,
     borderWidth: 1,
     gap: 14,
     marginBottom: 16,
     padding: 18,
   },
   sectionKicker: {
+    ...HHS_TYPOGRAPHY.kicker,
     color: COLORS.gold,
     fontSize: 11,
     fontWeight: '700',
@@ -592,22 +590,26 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   cardTitle: {
+    ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
     fontSize: 24,
     fontWeight: '700',
   },
   bodyText: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 15,
     lineHeight: 23,
   },
   helperText: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 13,
     fontStyle: 'italic',
     lineHeight: 20,
   },
   quoteText: {
+    ...HHS_TYPOGRAPHY.body,
     borderLeftColor: COLORS.gold,
     borderLeftWidth: 3,
     color: COLORS.text,
@@ -633,11 +635,13 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   warningText: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.gold,
     fontSize: 14,
     lineHeight: 20,
   },
   input: {
+    ...HHS_TYPOGRAPHY.body,
     backgroundColor: COLORS.cardAlt,
     borderColor: COLORS.border,
     borderRadius: 12,
@@ -650,11 +654,12 @@ const styles = StyleSheet.create({
   primaryButton: {
     alignItems: 'center',
     backgroundColor: COLORS.gold,
-    borderRadius: 12,
+    borderRadius: HHS_STYLES.buttonRadius,
     paddingHorizontal: 16,
     paddingVertical: 13,
   },
   primaryButtonText: {
+    ...HHS_TYPOGRAPHY.button,
     color: COLORS.background,
     fontSize: 13,
     fontWeight: '800',
@@ -664,12 +669,13 @@ const styles = StyleSheet.create({
   secondaryButton: {
     alignItems: 'center',
     borderColor: COLORS.borderStrong,
-    borderRadius: 12,
+    borderRadius: HHS_STYLES.buttonRadius,
     borderWidth: 1,
     paddingHorizontal: 16,
     paddingVertical: 13,
   },
   secondaryButtonText: {
+    ...HHS_TYPOGRAPHY.button,
     color: COLORS.gold,
     fontSize: 12,
     fontWeight: '800',
@@ -682,6 +688,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   textButtonText: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 13,
     fontWeight: '700',
@@ -700,6 +707,7 @@ const styles = StyleSheet.create({
     padding: 13,
   },
   infoLabel: {
+    ...HHS_TYPOGRAPHY.kicker,
     color: COLORS.gold,
     fontSize: 10,
     fontWeight: '700',
@@ -708,6 +716,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   infoValue: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.text,
     fontSize: 15,
     lineHeight: 21,
@@ -729,24 +738,27 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   preferenceLabel: {
+    ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
     fontSize: 15,
     fontWeight: '700',
     marginBottom: 4,
   },
   preferenceDescription: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 13,
     lineHeight: 18,
   },
   settingsSavingText: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.gold,
     fontSize: 13,
     fontWeight: '700',
     textAlign: 'center',
   },
   readOnlyPill: {
-    borderRadius: 999,
+    borderRadius: HHS_STYLES.pillRadius,
     borderWidth: 1,
     minWidth: 48,
     paddingHorizontal: 10,
@@ -761,6 +773,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(166, 157, 141, 0.25)',
   },
   readOnlyPillText: {
+    ...HHS_TYPOGRAPHY.button,
     fontSize: 12,
     fontWeight: '800',
     textAlign: 'center',
@@ -772,6 +785,7 @@ const styles = StyleSheet.create({
     color: COLORS.muted,
   },
   footerNote: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 12,
     opacity: 0.6,

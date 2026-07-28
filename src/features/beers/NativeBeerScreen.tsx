@@ -14,19 +14,11 @@ import {
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '../auth/AuthProvider';
+import { HHS_COLORS, HHS_STYLES, HHS_TYPOGRAPHY } from '../../theme/hhsTheme';
 import { fetchBeers, fetchUserBeerRating, upsertUserBeerRating } from './beerService';
 import type { Beer, BeerRating } from './types';
 
-const COLORS = {
-  background: '#191726',
-  card: '#201d30',
-  cardAlt: '#28233a',
-  text: '#d9d8d2',
-  muted: '#a69d8d',
-  gold: '#d97c2b',
-  border: 'rgba(217, 124, 43, 0.18)',
-  borderStrong: 'rgba(217, 124, 43, 0.45)',
-};
+const COLORS = HHS_COLORS;
 
 type NativeBeerScreenProps = {
   mode?: 'calendar' | 'yourBeer';
@@ -487,13 +479,15 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWebFallback }: Nativ
               <Text style={styles.appKicker}>Hallowed Hop Society</Text>
               <Text style={styles.headerTitle}>{mode === 'calendar' ? 'The Calendar' : 'Your Beer'}</Text>
             </View>
-            <TouchableOpacity
-              style={styles.webFallbackButton}
-              onPress={() => onOpenWebFallback('/beers')}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.webFallbackText}>Web</Text>
-            </TouchableOpacity>
+            {mode === 'calendar' ? (
+              <TouchableOpacity
+                style={styles.webFallbackButton}
+                onPress={() => onOpenWebFallback('/beers')}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.webFallbackText}>Web</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
 
           {loading ? (
@@ -550,6 +544,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   appKicker: {
+    ...HHS_TYPOGRAPHY.kicker,
     color: COLORS.gold,
     fontSize: 11,
     fontWeight: '700',
@@ -558,18 +553,20 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   headerTitle: {
+    ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
     fontSize: 34,
     fontWeight: '700',
   },
   webFallbackButton: {
     borderColor: COLORS.borderStrong,
-    borderRadius: 999,
+    borderRadius: HHS_STYLES.pillRadius,
     borderWidth: 1,
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
   webFallbackText: {
+    ...HHS_TYPOGRAPHY.button,
     color: COLORS.gold,
     fontSize: 12,
     fontWeight: '700',
@@ -586,6 +583,7 @@ const styles = StyleSheet.create({
     padding: 28,
   },
   loadingText: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.gold,
     fontSize: 15,
   },
@@ -597,12 +595,14 @@ const styles = StyleSheet.create({
     padding: 18,
   },
   errorTitle: {
+    ...HHS_TYPOGRAPHY.display,
     color: COLORS.gold,
     fontSize: 18,
     fontWeight: '700',
     marginBottom: 8,
   },
   errorText: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 14,
     lineHeight: 21,
@@ -611,11 +611,12 @@ const styles = StyleSheet.create({
   retryButton: {
     alignSelf: 'flex-start',
     backgroundColor: COLORS.gold,
-    borderRadius: 10,
+    borderRadius: HHS_STYLES.buttonRadius,
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
   retryButtonText: {
+    ...HHS_TYPOGRAPHY.button,
     color: COLORS.background,
     fontSize: 13,
     fontWeight: '700',
@@ -628,6 +629,7 @@ const styles = StyleSheet.create({
     padding: 18,
   },
   messageText: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 15,
     fontStyle: 'italic',
@@ -638,12 +640,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: COLORS.card,
     borderColor: COLORS.border,
-    borderRadius: 14,
+    borderRadius: HHS_STYLES.cardRadius,
     borderWidth: 1,
     marginBottom: 30,
     padding: 22,
   },
   kicker: {
+    ...HHS_TYPOGRAPHY.kicker,
     color: COLORS.gold,
     fontSize: 11,
     fontWeight: '700',
@@ -653,6 +656,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   countdown: {
+    ...HHS_TYPOGRAPHY.display,
     color: COLORS.gold,
     fontSize: 32,
     fontWeight: '700',
@@ -660,6 +664,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   bodyText: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 15,
     lineHeight: 26,
@@ -669,6 +674,7 @@ const styles = StyleSheet.create({
     marginBottom: 30,
   },
   dayLabel: {
+    ...HHS_TYPOGRAPHY.kicker,
     color: COLORS.muted,
     fontSize: 12,
     letterSpacing: 1.8,
@@ -684,6 +690,7 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   beerTitle: {
+    ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
     fontSize: 31,
     fontWeight: '700',
@@ -691,16 +698,19 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   breweryTitle: {
+    ...HHS_TYPOGRAPHY.display,
     color: COLORS.gold,
     fontSize: 18,
     marginBottom: 4,
   },
   metaText: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 14,
     marginBottom: 14,
   },
   descriptionText: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.text,
     fontSize: 15,
     lineHeight: 24,
@@ -716,6 +726,7 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
   },
   detailButtonText: {
+    ...HHS_TYPOGRAPHY.button,
     color: COLORS.gold,
     fontSize: 12,
     fontWeight: '700',
@@ -734,12 +745,14 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   placeholderActionTitle: {
+    ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
     fontSize: 16,
     fontWeight: '700',
     marginBottom: 6,
   },
   placeholderActionText: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 13,
     lineHeight: 19,
@@ -753,6 +766,7 @@ const styles = StyleSheet.create({
     padding: 18,
   },
   factLabel: {
+    ...HHS_TYPOGRAPHY.kicker,
     color: COLORS.gold,
     fontSize: 11,
     fontWeight: '700',
@@ -761,6 +775,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   factText: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 14,
     lineHeight: 23,
@@ -777,6 +792,7 @@ const styles = StyleSheet.create({
     paddingTop: 24,
   },
   calendarTitle: {
+    ...HHS_TYPOGRAPHY.display,
     color: COLORS.gold,
     fontSize: 24,
     fontWeight: '700',
@@ -815,6 +831,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.borderStrong,
   },
   dayNumber: {
+    ...HHS_TYPOGRAPHY.display,
     color: COLORS.muted,
     fontSize: 22,
     fontWeight: '700',
@@ -829,16 +846,19 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   listBeerName: {
+    ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
     fontSize: 17,
     fontWeight: '700',
     marginBottom: 3,
   },
   listBrewery: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.gold,
     fontSize: 14,
   },
   unrevealedText: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 14,
     fontStyle: 'italic',
@@ -850,6 +870,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   todayBadgeText: {
+    ...HHS_TYPOGRAPHY.button,
     color: COLORS.background,
     fontSize: 11,
     fontWeight: '700',
@@ -881,6 +902,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   modalDayLabel: {
+    ...HHS_TYPOGRAPHY.kicker,
     color: COLORS.muted,
     fontSize: 11,
     fontWeight: '700',
@@ -892,6 +914,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   closeButtonText: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 18,
     fontWeight: '700',
@@ -907,6 +930,7 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   modalBeerTitle: {
+    ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
     fontSize: 26,
     fontWeight: '700',
@@ -914,16 +938,19 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   modalBreweryTitle: {
+    ...HHS_TYPOGRAPHY.display,
     color: COLORS.gold,
     fontSize: 18,
     marginBottom: 4,
   },
   modalMetaText: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 14,
     marginBottom: 14,
   },
   modalDescriptionText: {
+    ...HHS_TYPOGRAPHY.body,
     borderTopColor: COLORS.border,
     borderTopWidth: 1,
     color: COLORS.text,
@@ -952,7 +979,7 @@ const styles = StyleSheet.create({
   starButton: {
     alignItems: 'center',
     borderColor: COLORS.border,
-    borderRadius: 999,
+    borderRadius: HHS_STYLES.pillRadius,
     borderWidth: 1,
     height: 42,
     justifyContent: 'center',
@@ -963,6 +990,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.gold,
   },
   starText: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 22,
   },
@@ -970,12 +998,14 @@ const styles = StyleSheet.create({
     color: COLORS.gold,
   },
   ratingHelpText: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 13,
     lineHeight: 19,
     marginTop: 10,
   },
   ratingErrorText: {
+    ...HHS_TYPOGRAPHY.body,
     color: '#ffb4a8',
     fontSize: 13,
     lineHeight: 19,

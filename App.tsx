@@ -21,6 +21,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { WebView, WebViewMessageEvent, WebViewNavigation } from 'react-native-webview';
 import { useAuth } from './src/features/auth/AuthProvider';
 import { NativeAppShell } from './src/navigation/NativeAppShell';
+import { HHS_COLORS, HHS_STYLES, HHS_TYPOGRAPHY } from './src/theme/hhsTheme';
 
 const HHS_ORIGIN = 'https://hallowedhopsociety.com';
 const HOME_URL = `${HHS_ORIGIN}/`;
@@ -31,17 +32,7 @@ const NOTIF_PREFS_STORAGE_PREFIX = '@hhs:notif-prefs';
 const PUSH_TOKEN_STORAGE_PREFIX = '@hhs:push-token';
 const VENMO_HANDLE = 'zpphillips';
 
-const COLORS = {
-  background: '#191726',
-  card: '#201d30',
-  cardAlt: '#28233a',
-  text: '#d9d8d2',
-  muted: '#a69d8d',
-  gold: '#d97c2b',
-  goldDark: '#9f561c',
-  border: 'rgba(217, 124, 43, 0.18)',
-  borderStrong: 'rgba(217, 124, 43, 0.45)',
-};
+const COLORS = HHS_COLORS;
 
 // ── Notification preference keys & defaults ────────────────────────────────
 type NotifPrefs = {
@@ -883,6 +874,11 @@ function HhsWebViewFallbackApp({ initialPath }: { initialPath?: string }) {
     webViewRef.current?.injectJavaScript(`window.location.replace('${HHS_ORIGIN}/feedback'); true;`);
   }, []);
 
+  const handleOpenAboutHhs = useCallback(() => {
+    setMenuOpen(false);
+    webViewRef.current?.injectJavaScript(`window.location.replace('${HOME_URL}'); true;`);
+  }, []);
+
   const handleOpenSettings = useCallback(() => {
     setMenuOpen(false);
     setSettingsVisible(true);
@@ -973,10 +969,13 @@ function HhsWebViewFallbackApp({ initialPath }: { initialPath?: string }) {
                     </View>
                   )}
 
-                  <TouchableOpacity style={styles.menuItem} onPress={handleOpenFeedback} activeOpacity={0.75}>
+                  <TouchableOpacity
+                    style={styles.menuItem}
+                    onPress={loggedInUser ? handleSignOut : handleSignIn}
+                    activeOpacity={0.75}
+                  >
                     <View style={styles.menuItemText}>
-                      <Text style={styles.menuItemLabel}>Feedback</Text>
-                      <Text style={styles.menuItemSub}>Suggest a feature or report an issue</Text>
+                      <Text style={styles.menuItemLabel}>Sign-in / out</Text>
                     </View>
                     <Text style={styles.menuChevron}>›</Text>
                   </TouchableOpacity>
@@ -989,22 +988,21 @@ function HhsWebViewFallbackApp({ initialPath }: { initialPath?: string }) {
                     <Text style={styles.menuChevron}>›</Text>
                   </TouchableOpacity>
 
-                  <View style={styles.menuDivider} />
+                  <TouchableOpacity style={styles.menuItem} onPress={handleOpenAboutHhs} activeOpacity={0.75}>
+                    <View style={styles.menuItemText}>
+                      <Text style={styles.menuItemLabel}>About HHS</Text>
+                      <Text style={styles.menuItemSub}>Return to the Society welcome</Text>
+                    </View>
+                    <Text style={styles.menuChevron}>›</Text>
+                  </TouchableOpacity>
 
-                  {loggedInUser ? (
-                    <TouchableOpacity style={styles.menuItem} onPress={handleSignOut} activeOpacity={0.75}>
-                      <View style={styles.menuItemText}>
-                        <Text style={[styles.menuItemLabel, { color: '#c97c6e' }]}>Sign Out</Text>
-                      </View>
-                    </TouchableOpacity>
-                  ) : (
-                    <TouchableOpacity style={styles.menuItem} onPress={handleSignIn} activeOpacity={0.75}>
-                      <View style={styles.menuItemText}>
-                        <Text style={styles.menuItemLabel}>Sign In</Text>
-                      </View>
-                      <Text style={styles.menuChevron}>›</Text>
-                    </TouchableOpacity>
-                  )}
+                  <TouchableOpacity style={styles.menuItem} onPress={handleOpenFeedback} activeOpacity={0.75}>
+                    <View style={styles.menuItemText}>
+                      <Text style={styles.menuItemLabel}>Feedback</Text>
+                      <Text style={styles.menuItemSub}>Suggest a feature or report an issue</Text>
+                    </View>
+                    <Text style={styles.menuChevron}>›</Text>
+                  </TouchableOpacity>
 
                   {/* Version footer — helps confirm the installed build */}
                   <Text style={styles.menuVersionFooter}>HHS v1.0.22 (23)</Text>
@@ -1352,8 +1350,8 @@ const styles = StyleSheet.create({
   },
   menuSheet: {
     backgroundColor: COLORS.card,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderTopLeftRadius: HHS_STYLES.cardRadius + 4,
+    borderTopRightRadius: HHS_STYLES.cardRadius + 4,
     borderTopWidth: 1,
     borderLeftWidth: 1,
     borderRightWidth: 1,
@@ -1374,12 +1372,12 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.border,
   },
   menuTitle: {
+    ...HHS_TYPOGRAPHY.display,
     color: COLORS.gold,
     fontSize: 16,
     fontWeight: '800',
     letterSpacing: 1.5,
     textTransform: 'uppercase',
-    fontFamily: 'serif',
   },
   menuCloseButton: {
     width: 30,
@@ -1405,16 +1403,16 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   menuUserName: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.text,
     fontSize: 15,
     fontWeight: '700',
-    fontFamily: 'serif',
   },
   menuUserEmail: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 12,
     marginTop: 2,
-    fontFamily: 'serif',
   },
   menuItem: {
     flexDirection: 'row',
@@ -1433,29 +1431,24 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   menuItemLabel: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.text,
     fontSize: 16,
     fontWeight: '600',
-    fontFamily: 'serif',
   },
   menuItemSub: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 12,
-    fontFamily: 'serif',
   },
   menuChevron: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 22,
     fontWeight: '300',
-    fontFamily: 'serif',
-  },
-  menuDivider: {
-    height: 1,
-    backgroundColor: COLORS.border,
-    marginHorizontal: 20,
-    marginVertical: 4,
   },
   menuVersionFooter: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 11,
     textAlign: 'center',
@@ -1463,7 +1456,6 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     letterSpacing: 0.5,
     opacity: 0.7,
-    fontFamily: 'serif',
   },
   // Settings modal
   settingsSheet: {
@@ -1485,23 +1477,23 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
   },
   settingsSignInNoteText: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 13,
     lineHeight: 19,
-    fontFamily: 'serif',
   },
   settingsSection: {
     marginTop: 20,
     marginHorizontal: 20,
   },
   settingsSectionLabel: {
+    ...HHS_TYPOGRAPHY.kicker,
     color: COLORS.gold,
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 1.8,
     textTransform: 'uppercase',
     marginBottom: 10,
-    fontFamily: 'serif',
   },
   settingsRow: {
     flexDirection: 'row',
@@ -1520,16 +1512,16 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   settingsRowLabel: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.text,
     fontSize: 15,
     fontWeight: '600',
-    fontFamily: 'serif',
   },
   settingsRowSub: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 12,
     lineHeight: 17,
-    fontFamily: 'serif',
   },
   settingsIndented: {
     paddingLeft: 12,
@@ -1539,12 +1531,12 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   settingsSavingText: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 12,
     textAlign: 'center',
     marginTop: 16,
     letterSpacing: 0.5,
-    fontFamily: 'serif',
   },
   webViewContainer: {
     flex: 1,
@@ -1562,6 +1554,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
   },
   loadingText: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.text,
     fontSize: 17,
     letterSpacing: 0.8,
@@ -1583,6 +1576,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.border,
   },
   errorTitle: {
+    ...HHS_TYPOGRAPHY.display,
     color: COLORS.gold,
     fontSize: 24,
     fontWeight: '700',
@@ -1591,6 +1585,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   errorBody: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.text,
     fontSize: 17,
     lineHeight: 25,
@@ -1599,12 +1594,13 @@ const styles = StyleSheet.create({
   },
   retryButton: {
     alignItems: 'center',
-    borderRadius: 10,
+    borderRadius: HHS_STYLES.buttonRadius,
     backgroundColor: COLORS.gold,
     paddingVertical: 14,
     paddingHorizontal: 18,
   },
   retryButtonText: {
+    ...HHS_TYPOGRAPHY.button,
     color: COLORS.background,
     fontSize: 15,
     fontWeight: '800',
@@ -1632,6 +1628,7 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   kicker: {
+    ...HHS_TYPOGRAPHY.kicker,
     color: COLORS.gold,
     fontSize: 13,
     fontWeight: '800',
@@ -1640,6 +1637,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   flowTitle: {
+    ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
     fontSize: 28,
     fontWeight: '800',
@@ -1647,12 +1645,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   flowBody: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.text,
     fontSize: 16,
     lineHeight: 24,
     textAlign: 'center',
   },
   flowMessage: {
+    ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 14,
     lineHeight: 20,
@@ -1668,6 +1668,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   stepTitle: {
+    ...HHS_TYPOGRAPHY.display,
     color: COLORS.gold,
     fontSize: 22,
     fontWeight: '800',
@@ -1676,12 +1677,13 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     alignItems: 'center',
-    borderRadius: 12,
+    borderRadius: HHS_STYLES.buttonRadius,
     backgroundColor: COLORS.gold,
     paddingVertical: 15,
     paddingHorizontal: 18,
   },
   primaryButtonText: {
+    ...HHS_TYPOGRAPHY.button,
     color: COLORS.background,
     fontSize: 15,
     fontWeight: '900',
@@ -1693,13 +1695,14 @@ const styles = StyleSheet.create({
   },
   secondaryButton: {
     alignItems: 'center',
-    borderRadius: 12,
+    borderRadius: HHS_STYLES.buttonRadius,
     borderWidth: 1,
     borderColor: COLORS.borderStrong,
     paddingVertical: 14,
     paddingHorizontal: 18,
   },
   secondaryButtonText: {
+    ...HHS_TYPOGRAPHY.button,
     color: COLORS.text,
     fontSize: 14,
     fontWeight: '800',
