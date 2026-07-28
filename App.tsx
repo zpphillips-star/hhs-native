@@ -103,6 +103,11 @@ type FirstLoginRecord = {
   updatedAt: string;
 };
 
+function getInitialWebUrl(initialPath?: string) {
+  if (!initialPath) return HOME_URL;
+  return initialPath.startsWith('/') ? `${HHS_ORIGIN}${initialPath}` : HOME_URL;
+}
+
 const MEMBERSHIP_PACKAGES: MembershipPackage[] = [
   {
     id: 'hallowed',
@@ -543,13 +548,14 @@ function getDisplayName(user: LoggedInUser): string {
   return 'Member';
 }
 
-function HhsWebViewFallbackApp() {
+function HhsWebViewFallbackApp({ initialPath }: { initialPath?: string }) {
   const { signOut: signOutNative } = useAuth();
+  const initialUrl = getInitialWebUrl(initialPath);
   const webViewRef = useRef<WebView>(null);
   const checkedUserKeyRef = useRef<string | null>(null);
   const hasNavigatedToBeerRef = useRef(false);
-  const currentUrlRef = useRef(HOME_URL);
-  const pendingDocumentUrlRef = useRef<string | null>(HOME_URL);
+  const currentUrlRef = useRef(initialUrl);
+  const pendingDocumentUrlRef = useRef<string | null>(initialUrl);
   const [canGoBack, setCanGoBack] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [loggedInUser, setLoggedInUser] = useState<LoggedInUser | null>(null);
@@ -1158,7 +1164,7 @@ function HhsWebViewFallbackApp() {
             </Modal>
         <WebView
           ref={webViewRef}
-          source={{ uri: HOME_URL }}
+          source={{ uri: initialUrl }}
           style={styles.webView}
           containerStyle={styles.webViewContainer}
           originWhitelist={['https://*', 'mailto:*', 'tel:*', 'venmo:*']}
@@ -1326,7 +1332,7 @@ function HhsWebViewFallbackApp() {
 }
 
 export default function App() {
-  return <NativeAppShell fallback={<HhsWebViewFallbackApp />} />;
+  return <NativeAppShell fallback={(initialPath) => <HhsWebViewFallbackApp initialPath={initialPath} />} />;
 }
 
 const styles = StyleSheet.create({
