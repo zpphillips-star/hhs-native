@@ -1,5 +1,5 @@
 import { supabase } from '../../lib/supabase';
-import type { Beer, BeerRating } from './types';
+import type { Beer, BeerRating, BeerRatingSummary } from './types';
 
 const BEER_LIST_SELECT = [
   'id',
@@ -49,6 +49,29 @@ export async function fetchUserBeerRating(userId: string, beerId: string): Promi
   }
 
   return (data ?? null) as BeerRating | null;
+}
+
+export async function fetchBeerRatingSummary(beerId: string): Promise<BeerRatingSummary> {
+  if (!supabase) {
+    throw new Error('Supabase public env is not configured for the native app.');
+  }
+
+  const { data, error } = await supabase.from('ratings').select('stars').eq('beer_id', beerId);
+
+  if (error) {
+    throw error;
+  }
+
+  const ratings = data ?? [];
+  if (ratings.length === 0) {
+    return { average: null, count: 0 };
+  }
+
+  const total = ratings.reduce((sum, rating) => sum + rating.stars, 0);
+  return {
+    average: Math.round((total / ratings.length) * 10) / 10,
+    count: ratings.length,
+  };
 }
 
 export async function upsertUserBeerRating(userId: string, beerId: string, stars: number): Promise<BeerRating> {

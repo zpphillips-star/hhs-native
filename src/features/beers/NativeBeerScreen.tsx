@@ -15,10 +15,13 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '../auth/AuthProvider';
 import { HHS_COLORS, HHS_STYLES, HHS_TYPOGRAPHY } from '../../theme/hhsTheme';
-import { fetchBeers, fetchUserBeerRating, upsertUserBeerRating } from './beerService';
-import type { Beer, BeerRating } from './types';
+import { fetchBeerRatingSummary, fetchBeers, fetchUserBeerRating, upsertUserBeerRating } from './beerService';
+import type { Beer, BeerRating, BeerRatingSummary } from './types';
 
 const COLORS = HHS_COLORS;
+const BEER_CALENDAR_YEAR = 2026;
+const BEER_CALENDAR_MONTH_INDEX = 9;
+const BEER_CALENDAR_DAYS = 31;
 
 type NativeBeerScreenProps = {
   mode?: 'calendar' | 'yourBeer';
@@ -30,19 +33,36 @@ function formatBeerMeta(beer: Beer) {
   return parts.join(' · ');
 }
 
-function getOctoberStart(now: Date) {
-  const octoberStart = new Date(now.getFullYear(), 9, 1);
-  if (octoberStart.getTime() < now.getTime()) {
-    octoberStart.setFullYear(octoberStart.getFullYear() + 1);
-  }
-  return octoberStart;
+function getOctoberStart() {
+  return new Date(BEER_CALENDAR_YEAR, BEER_CALENDAR_MONTH_INDEX, 1);
+}
+
+function getOctoberEnd() {
+  return new Date(BEER_CALENDAR_YEAR, BEER_CALENDAR_MONTH_INDEX, BEER_CALENDAR_DAYS, 23, 59, 59, 999);
 }
 
 function getCountdownText(now: Date) {
-  const diff = getOctoberStart(now).getTime() - now.getTime();
+  const diff = Math.max(0, getOctoberStart().getTime() - now.getTime());
   const days = Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)));
   const hours = Math.max(0, Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)));
   return `${days} days · ${hours} hrs`;
+}
+
+function getCalendarState(now: Date) {
+  const isBeforeStart = now.getTime() < getOctoberStart().getTime();
+  const isActiveOctober =
+    now.getFullYear() === BEER_CALENDAR_YEAR && now.getMonth() === BEER_CALENDAR_MONTH_INDEX;
+  const isComplete = now.getTime() > getOctoberEnd().getTime();
+  const todayDay = isActiveOctober ? now.getDate() : null;
+  const revealedThroughDay = isActiveOctober ? now.getDate() : isComplete ? BEER_CALENDAR_DAYS : null;
+
+  return {
+    isBeforeStart,
+    isActiveOctober,
+    isComplete,
+    revealedThroughDay,
+    todayDay,
+  };
 }
 
 export function NativeBeerScreen({ mode = 'calendar', onOpenWebFallback }: NativeBeerScreenProps) {
@@ -60,11 +80,12 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWebFallback }: Nativ
   const [todayRatingLoading, setTodayRatingLoading] = useState(false);
   const [todayRatingSaving, setTodayRatingSaving] = useState(false);
   const [todayRatingError, setTodayRatingError] = useState<string | null>(null);
+  const [todayRatingSummary, setTodayRatingSummary] = useState<BeerRatingSummary>({ average: null, count: 0 });
+  const [todayRatingSummaryLoading, setTodayRatingSummaryLoading] = useState(false);
 
   const now = useMemo(() => new Date(), []);
-  const isOctober = now.getMonth() === 9;
-  const year = now.getFullYear();
-  const todayDay = isOctober ? now.getDate() : null;
+  const calendarState = useMemo(() => getCalendarState(now), [now]);
+  const { isActiveOctober, isBeforeStart, isComplete, revealedThroughDay, todayDay } = calendarState;
 
   const beerMap = useMemo(() => {
     const map = new Map<number, Beer>();
@@ -153,6 +174,32 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWebFallback }: Nativ
     };
   }, [mode, todayBeer, user?.id]);
 
+  useEffect(() => {
+    setTodayRatingSummary({ average: null, count: 0 });
+
+    if (mode !== 'yourBeer' || !todayBeer) {
+      setTodayRatingSummaryLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setTodayRatingSummaryLoading(true);
+    fetchBeerRatingSummary(todayBeer.id)
+      .then((summary) => {
+        if (!cancelled) setTodayRatingSummary(summary);
+      })
+      .catch(() => {
+        if (!cancelled) setTodayRatingSummary({ average: null, count: 0 });
+      })
+      .finally(() => {
+        if (!cancelled) setTodayRatingSummaryLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, todayBeer]);
+
   const openBeerDetail = (beer: Beer) => {
     setSelectedBeer(beer);
   };
@@ -188,6 +235,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWebFallback }: Nativ
     try {
       const rating = await upsertUserBeerRating(user.id, todayBeer.id, stars);
       setTodayRating(rating);
+      setTodayRatingSummary(await fetchBeerRatingSummary(todayBeer.id));
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not save your rating.';
       setTodayRatingError(message);
@@ -245,8 +293,33 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWebFallback }: Nativ
     </View>
   );
 
+  const renderSocietyRatingPanel = () => (
+    <View style={styles.ratingCard}>
+      <Text style={styles.factLabel}>Society Rating</Text>
+      {todayRatingSummaryLoading ? (
+        <View style={styles.ratingLoadingRow}>
+          <ActivityIndicator color={COLORS.gold} />
+          <Text style={styles.ratingHelpText}>Loading Society rating...</Text>
+        </View>
+      ) : todayRatingSummary.average !== null ? (
+        <View style={styles.societyRatingRow}>
+          <Text style={styles.societyStars}>
+            {'★'.repeat(Math.round(todayRatingSummary.average))}
+            {'☆'.repeat(5 - Math.round(todayRatingSummary.average))}
+          </Text>
+          <Text style={styles.ratingHelpText}>
+            {todayRatingSummary.average} / 5 · {todayRatingSummary.count}{' '}
+            {todayRatingSummary.count === 1 ? 'rating' : 'ratings'}
+          </Text>
+        </View>
+      ) : (
+        <Text style={styles.ratingHelpText}>No ratings yet. Be the first Society member to weigh in.</Text>
+      )}
+    </View>
+  );
+
   const renderCalendarIntro = () => {
-    if (!isOctober) {
+    if (isBeforeStart) {
       return (
         <View style={styles.heroCard}>
           <Text style={styles.kicker}>The Calendar Is Being Set</Text>
@@ -259,9 +332,20 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWebFallback }: Nativ
       );
     }
 
+    if (isComplete) {
+      return (
+        <View style={styles.heroCard}>
+          <Text style={styles.kicker}>October {BEER_CALENDAR_YEAR}</Text>
+          <Text style={styles.bodyText}>
+            The 2026 ritual is complete. All thirty-one beers are now visible in the archive below.
+          </Text>
+        </View>
+      );
+    }
+
     return (
       <View style={styles.heroCard}>
-        <Text style={styles.kicker}>October {year}</Text>
+        <Text style={styles.kicker}>October {BEER_CALENDAR_YEAR}</Text>
         <Text style={styles.bodyText}>
           Revealed beers are visible through today. Future pours stay hidden until their day arrives.
         </Text>
@@ -270,7 +354,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWebFallback }: Nativ
   };
 
   const renderYourBeer = () => {
-    if (isOctober && !todayBeer) {
+    if (isActiveOctober && !todayBeer) {
       return (
         <View style={styles.messageCard}>
           <Text style={styles.messageText}>Today&apos;s beer hasn&apos;t been added yet. Check back soon.</Text>
@@ -278,14 +362,15 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWebFallback }: Nativ
       );
     }
 
-    if (!isOctober || !todayBeer) {
+    if (!isActiveOctober || !todayBeer) {
       return (
         <View style={styles.heroCard}>
           <Text style={styles.kicker}>Your Beer Awaits</Text>
-          <Text style={styles.countdown}>{getCountdownText(now)}</Text>
+          {isBeforeStart ? <Text style={styles.countdown}>{getCountdownText(now)}</Text> : null}
           <Text style={styles.bodyText}>
-            Today&apos;s beer becomes the center ritual when October begins. Until then, the circle is
-            gathering and the taps remain under wraps.
+            {isComplete
+              ? 'The 2026 calendar is complete. Use The Calendar to revisit the revealed beers.'
+              : 'Today’s beer becomes the center ritual when October 2026 begins. Until then, the circle is gathering and the taps remain under wraps.'}
           </Text>
         </View>
       );
@@ -295,7 +380,9 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWebFallback }: Nativ
     return (
       <View style={styles.todaySection}>
         <Text style={styles.kicker}>Today&apos;s Beer</Text>
-        <Text style={styles.dayLabel}>Day {todayBeer.day_number} · October {todayBeer.day_number}, {year}</Text>
+        <Text style={styles.dayLabel}>
+          Day {todayBeer.day_number} · October {todayBeer.day_number}, {BEER_CALENDAR_YEAR}
+        </Text>
         {todayBeer.image_url ? (
           <Image source={{ uri: todayBeer.image_url }} style={styles.heroImage} resizeMode="cover" />
         ) : null}
@@ -320,6 +407,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWebFallback }: Nativ
             ) : null}
           </View>
         ) : null}
+        {renderSocietyRatingPanel()}
         {renderRatingPanel({
           errorMessage: todayRatingError,
           loadingRating: todayRatingLoading,
@@ -328,13 +416,12 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWebFallback }: Nativ
           savingRating: todayRatingSaving,
         })}
         <View style={styles.actionGrid}>
-          <TouchableOpacity
-            activeOpacity={0.85}
-            onPress={() => onOpenWebFallback('/wall')}
-            style={styles.detailButton}
-          >
-            <Text style={styles.detailButtonText}>Open The Wall</Text>
-          </TouchableOpacity>
+          <View style={styles.placeholderAction}>
+            <Text style={styles.placeholderActionTitle}>Post to the Wall</Text>
+            <Text style={styles.placeholderActionText}>
+              Native wall posting is not wired yet. Use The Wall tab for the current web flow.
+            </Text>
+          </View>
           <View style={styles.placeholderAction}>
             <Text style={styles.placeholderActionTitle}>Check-In</Text>
             <Text style={styles.placeholderActionText}>Native wall posts and check-ins are planned for a later pass.</Text>
@@ -359,8 +446,8 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWebFallback }: Nativ
         {days.map((day) => {
           const beer = beerMap.get(day);
           const isToday = day === todayDay;
-          const isPast = todayDay ? day < todayDay : false;
-          const shouldReveal = Boolean(beer && (isPast || isToday));
+          const isPast = revealedThroughDay ? day < revealedThroughDay : false;
+          const shouldReveal = Boolean(beer && revealedThroughDay && day <= revealedThroughDay);
 
           return (
             <TouchableOpacity
@@ -410,7 +497,9 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWebFallback }: Nativ
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalDayLabel}>Day {selectedBeer.day_number} · October {selectedBeer.day_number}</Text>
+              <Text style={styles.modalDayLabel}>
+                Day {selectedBeer.day_number} · October {selectedBeer.day_number}, {BEER_CALENDAR_YEAR}
+              </Text>
               <TouchableOpacity style={styles.closeButton} onPress={closeBeerDetail} accessibilityLabel="Close beer detail">
                 <Text style={styles.closeButtonText}>✕</Text>
               </TouchableOpacity>
@@ -512,7 +601,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWebFallback }: Nativ
               <>
                 {renderCalendarIntro()}
                 <View style={styles.calendarHeader}>
-                  <Text style={styles.calendarTitle}>October {year}</Text>
+                  <Text style={styles.calendarTitle}>October {BEER_CALENDAR_YEAR}</Text>
                   <View style={styles.calendarRule} />
                 </View>
                 {renderList()}
@@ -975,6 +1064,15 @@ const styles = StyleSheet.create({
   starRow: {
     flexDirection: 'row',
     gap: 8,
+  },
+  societyRatingRow: {
+    gap: 6,
+  },
+  societyStars: {
+    ...HHS_TYPOGRAPHY.body,
+    color: COLORS.gold,
+    fontSize: 20,
+    lineHeight: 24,
   },
   starButton: {
     alignItems: 'center',
