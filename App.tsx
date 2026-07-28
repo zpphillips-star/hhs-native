@@ -6,11 +6,14 @@ import {
   ActivityIndicator,
   BackHandler,
   Linking,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -21,6 +24,8 @@ const HOME_URL = `${HHS_ORIGIN}/`;
 const BEER_URL = `${HHS_ORIGIN}/beers`;
 const HHS_HOSTS = new Set(['hallowedhopsociety.com', 'www.hallowedhopsociety.com']);
 const FIRST_LOGIN_STORAGE_PREFIX = '@hhs:first-login';
+const NOTIF_PREFS_STORAGE_PREFIX = '@hhs:notif-prefs';
+const PUSH_TOKEN_STORAGE_PREFIX = '@hhs:push-token';
 const VENMO_HANDLE = 'zpphillips';
 
 const COLORS = {
@@ -33,6 +38,25 @@ const COLORS = {
   goldDark: '#9f561c',
   border: 'rgba(217, 124, 43, 0.18)',
   borderStrong: 'rgba(217, 124, 43, 0.45)',
+};
+
+// ── Notification preference keys & defaults ────────────────────────────────
+type NotifPrefs = {
+  daily_beer: boolean;
+  social_all: boolean;
+  social_new_comment: boolean;
+  social_new_reaction: boolean;
+  social_reaction_to_your_items: boolean;
+  social_comment_on_your_items: boolean;
+};
+
+const DEFAULT_NOTIF_PREFS: NotifPrefs = {
+  daily_beer: true,
+  social_all: true,
+  social_new_comment: true,
+  social_new_reaction: true,
+  social_reaction_to_your_items: true,
+  social_comment_on_your_items: true,
 };
 
 type LoggedInUser = {
@@ -185,6 +209,8 @@ const hhsNativeBridgeJavaScript = `
       // Persist the native-app flag in localStorage so the web app can also check
       // it synchronously before any async auth/Supabase calls complete.
       try { localStorage.setItem('__hhs_native_app__', '1'); } catch (_) {}
+      // Mark setup as done so /welcome and SetupBanner/SetupGuide never show.
+      try { localStorage.setItem('hhs_setup_done', '1'); } catch (_) {}
       hideWebInstallPrompts();
       postLoggedInUser();
       if (!window.__HHS_NATIVE_BRIDGE_INSTALLED__) {
@@ -220,6 +246,100 @@ function isInternalUrl(url: string) {
 
 function getUserStorageKey(user: LoggedInUser) {
   return `${FIRST_LOGIN_STORAGE_PREFIX}:${(user.id || user.email).toLowerCase()}`;
+}
+
+function getNotifPrefsStorageKey(user: LoggedInUser) {
+  return `${NOTIF_PREFS_STORAGE_PREFIX}:${(user.id || user.email).toLowerCase()}`;
+}
+
+function getPushTokenStorageKey(user: LoggedInUser) {
+  return `${PUSH_TOKEN_STORAGE_PREFIX}:${(user.id || user.email).toLowerCase()}`;
+}
+
+async function loadLocalNotifPrefs(user: LoggedInUser): Promise<NotifPrefs> {
+  try {
+    const raw = await AsyncStorage.getItem(getNotifPrefsStorageKey(user));
+    if (raw) return { ...DEFAULT_NOTIF_PREFS, ...(JSON.parse(raw) as Partial<NotifPrefs>) };
+  } catch (err) {
+    console.warn('[HHS native] failed to load local notif prefs', err);
+  }
+  return { ...DEFAULT_NOTIF_PREFS };
+}
+
+async function saveLocalNotifPrefs(user: LoggedInUser, prefs: NotifPrefs): Promise<void> {
+  try {
+    await AsyncStorage.setItem(getNotifPrefsStorageKey(user), JSON.stringify(prefs));
+  } catch (err) {
+    console.warn('[HHS native] failed to save local notif prefs', err);
+  }
+}
+
+async function syncPrefsToBackend(user: LoggedInUser, prefs: NotifPrefs): Promise<void> {
+  if (!user.id) return; // need a UUID for the API
+  try {
+    const res = await fetch(`${HHS_ORIGIN}/api/notification-preferences`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: user.id, email: user.email, ...prefs }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      console.warn('[HHS native] prefs sync failed:', res.status, text);
+    }
+  } catch (err) {
+    console.warn('[HHS native] prefs sync network error:', err instanceof Error ? err.message : err);
+  }
+}
+
+async function fetchPrefsFromBackend(user: LoggedInUser): Promise<NotifPrefs | null> {
+  if (!user.id) return null;
+  try {
+    const res = await fetch(`${HHS_ORIGIN}/api/notification-preferences?user_id=${encodeURIComponent(user.id)}`);
+    if (!res.ok) return null;
+    const json = await res.json() as { ok?: boolean; prefs?: NotifPrefs };
+    if (json.ok && json.prefs) return { ...DEFAULT_NOTIF_PREFS, ...json.prefs };
+  } catch (err) {
+    console.warn('[HHS native] prefs fetch error:', err instanceof Error ? err.message : err);
+  }
+  return null;
+}
+
+async function registerAndStorePushToken(user: LoggedInUser): Promise<string | null> {
+  if (!user.id) return null;
+  try {
+    const tokenData = await Notifications.getExpoPushTokenAsync({
+      projectId: '7c415298-5d23-4f3d-b818-60a6ba5475a2',
+    });
+    const token = tokenData.data;
+    if (!token) return null;
+
+    // Cache locally so we can check if it was already sent
+    const cacheKey = getPushTokenStorageKey(user);
+    const cached = await AsyncStorage.getItem(cacheKey).catch(() => null);
+    if (cached === token) return token; // already registered this token
+
+    const res = await fetch(`${HHS_ORIGIN}/api/push-token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: user.id,
+        email: user.email,
+        token,
+        platform: Platform.OS,
+      }),
+    });
+    if (res.ok) {
+      await AsyncStorage.setItem(cacheKey, token).catch(() => {});
+    } else {
+      const text = await res.text();
+      console.warn('[HHS native] push token registration failed:', res.status, text);
+    }
+    return token;
+  } catch (err) {
+    // getExpoPushTokenAsync may throw on simulator/emulator — not fatal
+    console.warn('[HHS native] push token registration error:', err instanceof Error ? err.message : err);
+    return null;
+  }
 }
 
 function sanitizeBridgeUser(message: NativeBridgeMessage): LoggedInUser | null {
@@ -331,6 +451,14 @@ export default function App() {
   const [isRequestingNotifications, setIsRequestingNotifications] = useState(false);
   const [isOpeningVenmo, setIsOpeningVenmo] = useState(false);
 
+  // ── Hamburger menu state ─────────────────────────────────────────────────
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [settingsVisible, setSettingsVisible] = useState(false);
+
+  // ── Notification preferences state ───────────────────────────────────────
+  const [notifPrefs, setNotifPrefs] = useState<NotifPrefs>({ ...DEFAULT_NOTIF_PREFS });
+  const [prefsSaving, setPrefsSaving] = useState(false);
+
   useEffect(() => {
     if (Platform.OS !== 'android') return;
 
@@ -354,6 +482,21 @@ export default function App() {
     if (checkedUserKeyRef.current === userStorageKey) return;
     checkedUserKeyRef.current = userStorageKey;
 
+    // Load notification preferences (local first, then sync from backend)
+    try {
+      const localPrefs = await loadLocalNotifPrefs(user);
+      setNotifPrefs(localPrefs);
+      // Background sync from backend — updates UI if server has newer prefs
+      fetchPrefsFromBackend(user).then(serverPrefs => {
+        if (serverPrefs) {
+          setNotifPrefs(serverPrefs);
+          saveLocalNotifPrefs(user, serverPrefs).catch(() => {});
+        }
+      }).catch(() => {});
+    } catch (err) {
+      console.warn('[HHS native] prefs load failed:', err);
+    }
+
     try {
       const completed = await AsyncStorage.getItem(`${userStorageKey}:completed`);
       if (completed === 'true') {
@@ -362,6 +505,8 @@ export default function App() {
           hasNavigatedToBeerRef.current = true;
           webViewRef.current?.injectJavaScript(`window.location.replace('${BEER_URL}'); true;`);
         }
+        // Re-register push token in the background (token may have changed)
+        registerAndStorePushToken(user).catch(() => {});
         return;
       }
 
@@ -408,6 +553,10 @@ export default function App() {
 
       try {
         const message = JSON.parse(data) as NativeBridgeMessage;
+        if (message.type === 'HHS_OPEN_MENU') {
+          setMenuOpen(true);
+          return;
+        }
         if (message.type !== 'HHS_AUTH_USER') return;
 
         const user = sanitizeBridgeUser(message);
@@ -496,6 +645,15 @@ export default function App() {
 
       if (finalPermission.status === 'granted') {
         setFlowMessage('Notifications are enabled. Welcome to the inner circle.');
+        // Register Expo push token now that we have permission
+        if (loggedInUser) {
+          registerAndStorePushToken(loggedInUser).catch(() => {});
+          // Initialize prefs with defaults if this is first time
+          const prefs = { ...DEFAULT_NOTIF_PREFS };
+          setNotifPrefs(prefs);
+          saveLocalNotifPrefs(loggedInUser, prefs).catch(() => {});
+          syncPrefsToBackend(loggedInUser, prefs).catch(() => {});
+        }
       } else {
         setFlowMessage('Notifications are not enabled. You can still continue and change this later in system settings.');
       }
@@ -506,7 +664,7 @@ export default function App() {
       setIsRequestingNotifications(false);
       setFirstLoginStep('membership');
     }
-  }, []);
+  }, [loggedInUser]);
 
   const handleSelectMembership = useCallback(
     (membership: MembershipPackage) => {
@@ -551,10 +709,314 @@ export default function App() {
     }
   }, [loggedInUser, recordFirstLoginEvent, selectedMembership]);
 
+  // ── Hamburger menu handlers ───────────────────────────────────────────────
+
+  const handleSignOut = useCallback(() => {
+    setMenuOpen(false);
+    // Clear all Supabase auth tokens from the WebView's localStorage, then reload home
+    const signOutJS = `
+      (function() {
+        try {
+          Object.keys(localStorage).forEach(function(k) {
+            if ((k.startsWith('sb-') && k.endsWith('-auth-token')) || k === '__hhs_native_app__') {
+              localStorage.removeItem(k);
+            }
+          });
+        } catch(e) {}
+        window.location.replace('${HOME_URL}');
+      })();
+      true;
+    `;
+    webViewRef.current?.injectJavaScript(signOutJS);
+    setLoggedInUser(null);
+    checkedUserKeyRef.current = null;
+    hasNavigatedToBeerRef.current = false;
+  }, []);
+
+  const handleSignIn = useCallback(() => {
+    setMenuOpen(false);
+    webViewRef.current?.injectJavaScript(`window.location.replace('${HHS_ORIGIN}/auth'); true;`);
+  }, []);
+
+  const handleOpenFeedback = useCallback(() => {
+    setMenuOpen(false);
+    webViewRef.current?.injectJavaScript(`window.location.replace('${HHS_ORIGIN}/feedback'); true;`);
+  }, []);
+
+  const handleOpenSettings = useCallback(() => {
+    setMenuOpen(false);
+    setSettingsVisible(true);
+  }, []);
+
+  const handleUpdateNotifPref = useCallback(
+    async (key: keyof NotifPrefs, value: boolean) => {
+      if (!loggedInUser) return;
+      setPrefsSaving(true);
+
+      let newPrefs: NotifPrefs;
+
+      if (key === 'social_all') {
+        // Master social toggle — cascade to all individual social toggles
+        newPrefs = {
+          ...notifPrefs,
+          social_all: value,
+          social_new_comment: value,
+          social_new_reaction: value,
+          social_reaction_to_your_items: value,
+          social_comment_on_your_items: value,
+        };
+      } else {
+        newPrefs = { ...notifPrefs, [key]: value };
+        // If any individual social toggle is turned on, ensure master is also on
+        if (value && key !== 'daily_beer') {
+          newPrefs.social_all = true;
+        }
+        // If all individual social toggles are now off, turn master off too
+        const socialKeys: (keyof NotifPrefs)[] = [
+          'social_new_comment',
+          'social_new_reaction',
+          'social_reaction_to_your_items',
+          'social_comment_on_your_items',
+        ];
+        if (!value && key !== 'daily_beer') {
+          const anyOn = socialKeys.some(k => k !== key && newPrefs[k]);
+          if (!anyOn) newPrefs.social_all = false;
+        }
+      }
+
+      setNotifPrefs(newPrefs);
+      await saveLocalNotifPrefs(loggedInUser, newPrefs);
+      await syncPrefsToBackend(loggedInUser, newPrefs).finally(() => setPrefsSaving(false));
+    },
+    [loggedInUser, notifPrefs],
+  );
+
   return (
     <SafeAreaProvider>
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <StatusBar style="light" backgroundColor={COLORS.background} />
+
+        {/* ── Hamburger menu overlay ── */}
+        <Modal
+          visible={menuOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setMenuOpen(false)}
+          statusBarTranslucent
+        >
+          <TouchableWithoutFeedback onPress={() => setMenuOpen(false)}>
+            <View style={styles.menuBackdrop}>
+              <TouchableWithoutFeedback>
+                <View style={styles.menuSheet}>
+                  <View style={styles.menuHeader}>
+                    <Text style={styles.menuTitle}>Menu</Text>
+                    <TouchableOpacity
+                      onPress={() => setMenuOpen(false)}
+                      style={styles.menuCloseButton}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.menuCloseText}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {loggedInUser && (
+                    <View style={styles.menuUserBadge}>
+                      <Text style={styles.menuUserName} numberOfLines={1}>
+                        {getDisplayName(loggedInUser)}
+                      </Text>
+                      <Text style={styles.menuUserEmail} numberOfLines={1}>
+                        {loggedInUser.email}
+                      </Text>
+                    </View>
+                  )}
+
+                  <TouchableOpacity style={styles.menuItem} onPress={handleOpenFeedback} activeOpacity={0.75}>
+                    <View style={styles.menuItemText}>
+                      <Text style={styles.menuItemLabel}>Feedback</Text>
+                      <Text style={styles.menuItemSub}>Suggest a feature or report an issue</Text>
+                    </View>
+                    <Text style={styles.menuChevron}>›</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.menuItem} onPress={handleOpenSettings} activeOpacity={0.75}>
+                    <View style={styles.menuItemText}>
+                      <Text style={styles.menuItemLabel}>Settings</Text>
+                      <Text style={styles.menuItemSub}>App preferences</Text>
+                    </View>
+                    <Text style={styles.menuChevron}>›</Text>
+                  </TouchableOpacity>
+
+                  <View style={styles.menuDivider} />
+
+                  {loggedInUser ? (
+                    <TouchableOpacity style={styles.menuItem} onPress={handleSignOut} activeOpacity={0.75}>
+                      <View style={styles.menuItemText}>
+                        <Text style={[styles.menuItemLabel, { color: '#c97c6e' }]}>Sign Out</Text>
+                      </View>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity style={styles.menuItem} onPress={handleSignIn} activeOpacity={0.75}>
+                      <View style={styles.menuItemText}>
+                        <Text style={styles.menuItemLabel}>Sign In</Text>
+                      </View>
+                      <Text style={styles.menuChevron}>›</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {/* Version footer — helps confirm the installed build */}
+                  <Text style={styles.menuVersionFooter}>HHS v1.0.13 (14)</Text>
+                </View>
+              </TouchableWithoutFeedback>
+            </View>
+          </TouchableWithoutFeedback>
+        </Modal>
+
+        {/* ── Settings modal ── */}
+        <Modal
+          visible={settingsVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setSettingsVisible(false)}
+          statusBarTranslucent
+        >
+          <TouchableWithoutFeedback onPress={() => setSettingsVisible(false)}>
+            <View style={styles.menuBackdrop}>
+              <TouchableWithoutFeedback>
+                <View style={[styles.menuSheet, styles.settingsSheet]}>
+                  <View style={styles.menuHeader}>
+                    <Text style={styles.menuTitle}>Settings</Text>
+                    <TouchableOpacity
+                      onPress={() => setSettingsVisible(false)}
+                      style={styles.menuCloseButton}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.menuCloseText}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <ScrollView
+                    style={styles.settingsScroll}
+                    contentContainerStyle={styles.settingsScrollContent}
+                    showsVerticalScrollIndicator={false}
+                  >
+                    {!loggedInUser && (
+                      <View style={styles.settingsSignInNote}>
+                        <Text style={styles.settingsSignInNoteText}>
+                          Sign in to save notification settings to your account.
+                        </Text>
+                      </View>
+                    )}
+
+                    {/* Daily Beer Notifications */}
+                    <View style={styles.settingsSection}>
+                      <Text style={styles.settingsSectionLabel}>Beer Notifications</Text>
+                      <View style={styles.settingsRow}>
+                        <View style={styles.settingsRowText}>
+                          <Text style={styles.settingsRowLabel}>Daily Beer</Text>
+                          <Text style={styles.settingsRowSub}>
+                            Get notified each day your next beer is ready
+                          </Text>
+                        </View>
+                        <Switch
+                          value={notifPrefs.daily_beer}
+                          onValueChange={v => void handleUpdateNotifPref('daily_beer', v)}
+                          thumbColor={notifPrefs.daily_beer ? COLORS.gold : COLORS.muted}
+                          trackColor={{ false: COLORS.cardAlt, true: COLORS.goldDark }}
+                          ios_backgroundColor={COLORS.cardAlt}
+                        />
+                      </View>
+                    </View>
+
+                    {/* Social Notifications */}
+                    <View style={styles.settingsSection}>
+                      <Text style={styles.settingsSectionLabel}>Social Notifications</Text>
+
+                      {/* Master toggle */}
+                      <View style={[styles.settingsRow, styles.settingsRowMaster]}>
+                        <View style={styles.settingsRowText}>
+                          <Text style={styles.settingsRowLabel}>All Social Notifications</Text>
+                          <Text style={styles.settingsRowSub}>
+                            Enable or disable all social alerts at once
+                          </Text>
+                        </View>
+                        <Switch
+                          value={notifPrefs.social_all}
+                          onValueChange={v => void handleUpdateNotifPref('social_all', v)}
+                          thumbColor={notifPrefs.social_all ? COLORS.gold : COLORS.muted}
+                          trackColor={{ false: COLORS.cardAlt, true: COLORS.goldDark }}
+                          ios_backgroundColor={COLORS.cardAlt}
+                        />
+                      </View>
+
+                      {/* Individual social toggles */}
+                      <View style={styles.settingsIndented}>
+                        <View style={styles.settingsRow}>
+                          <View style={styles.settingsRowText}>
+                            <Text style={styles.settingsRowLabel}>New Comment</Text>
+                            <Text style={styles.settingsRowSub}>When someone comments on a post you follow</Text>
+                          </View>
+                          <Switch
+                            value={notifPrefs.social_new_comment}
+                            onValueChange={v => void handleUpdateNotifPref('social_new_comment', v)}
+                            thumbColor={notifPrefs.social_new_comment ? COLORS.gold : COLORS.muted}
+                            trackColor={{ false: COLORS.cardAlt, true: COLORS.goldDark }}
+                            ios_backgroundColor={COLORS.cardAlt}
+                          />
+                        </View>
+
+                        <View style={styles.settingsRow}>
+                          <View style={styles.settingsRowText}>
+                            <Text style={styles.settingsRowLabel}>New Reaction</Text>
+                            <Text style={styles.settingsRowSub}>When someone reacts to a post you follow</Text>
+                          </View>
+                          <Switch
+                            value={notifPrefs.social_new_reaction}
+                            onValueChange={v => void handleUpdateNotifPref('social_new_reaction', v)}
+                            thumbColor={notifPrefs.social_new_reaction ? COLORS.gold : COLORS.muted}
+                            trackColor={{ false: COLORS.cardAlt, true: COLORS.goldDark }}
+                            ios_backgroundColor={COLORS.cardAlt}
+                          />
+                        </View>
+
+                        <View style={styles.settingsRow}>
+                          <View style={styles.settingsRowText}>
+                            <Text style={styles.settingsRowLabel}>Reaction to Your Items</Text>
+                            <Text style={styles.settingsRowSub}>When someone reacts to your post</Text>
+                          </View>
+                          <Switch
+                            value={notifPrefs.social_reaction_to_your_items}
+                            onValueChange={v => void handleUpdateNotifPref('social_reaction_to_your_items', v)}
+                            thumbColor={notifPrefs.social_reaction_to_your_items ? COLORS.gold : COLORS.muted}
+                            trackColor={{ false: COLORS.cardAlt, true: COLORS.goldDark }}
+                            ios_backgroundColor={COLORS.cardAlt}
+                          />
+                        </View>
+
+                        <View style={styles.settingsRow}>
+                          <View style={styles.settingsRowText}>
+                            <Text style={styles.settingsRowLabel}>Comment on Your Items</Text>
+                            <Text style={styles.settingsRowSub}>When someone comments on your post</Text>
+                          </View>
+                          <Switch
+                            value={notifPrefs.social_comment_on_your_items}
+                            onValueChange={v => void handleUpdateNotifPref('social_comment_on_your_items', v)}
+                            thumbColor={notifPrefs.social_comment_on_your_items ? COLORS.gold : COLORS.muted}
+                            trackColor={{ false: COLORS.cardAlt, true: COLORS.goldDark }}
+                            ios_backgroundColor={COLORS.cardAlt}
+                          />
+                        </View>
+                      </View>
+                    </View>
+
+                    {prefsSaving && (
+                      <Text style={styles.settingsSavingText}>Saving…</Text>
+                    )}
+                  </ScrollView>
+                </View>
+              </TouchableWithoutFeedback>
+            </View>
+          </TouchableWithoutFeedback>
+        </Modal>
         <WebView
           ref={webViewRef}
           source={{ uri: HOME_URL }}
@@ -702,6 +1164,194 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
+  },
+  // Menu overlay
+  menuBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'flex-end',
+  },
+  menuSheet: {
+    backgroundColor: COLORS.card,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: COLORS.borderStrong,
+    paddingBottom: 32,
+    paddingHorizontal: 0,
+  },
+  menuHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  menuTitle: {
+    color: COLORS.gold,
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+  },
+  menuCloseButton: {
+    width: 30,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 15,
+    backgroundColor: COLORS.cardAlt,
+  },
+  menuCloseText: {
+    color: COLORS.muted,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  menuUserBadge: {
+    marginHorizontal: 20,
+    marginTop: 14,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: COLORS.cardAlt,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: 4,
+  },
+  menuUserName: {
+    color: COLORS.text,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  menuUserEmail: {
+    color: COLORS.muted,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+  },
+  menuItemIcon: {
+    fontSize: 22,
+    width: 30,
+    textAlign: 'center',
+  },
+  menuItemText: {
+    flex: 1,
+    gap: 2,
+  },
+  menuItemLabel: {
+    color: COLORS.text,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  menuItemSub: {
+    color: COLORS.muted,
+    fontSize: 12,
+  },
+  menuChevron: {
+    color: COLORS.muted,
+    fontSize: 22,
+    fontWeight: '300',
+  },
+  menuDivider: {
+    height: 1,
+    backgroundColor: COLORS.border,
+    marginHorizontal: 20,
+    marginVertical: 4,
+  },
+  menuVersionFooter: {
+    color: COLORS.muted,
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: 14,
+    marginBottom: 4,
+    letterSpacing: 0.5,
+    opacity: 0.7,
+  },
+  // Settings modal
+  settingsSheet: {
+    maxHeight: '85%',
+  },
+  settingsScroll: {
+    flexGrow: 0,
+  },
+  settingsScrollContent: {
+    paddingBottom: 32,
+  },
+  settingsSignInNote: {
+    marginHorizontal: 20,
+    marginTop: 14,
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: COLORS.cardAlt,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  settingsSignInNoteText: {
+    color: COLORS.muted,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  settingsSection: {
+    marginTop: 20,
+    marginHorizontal: 20,
+  },
+  settingsSectionLabel: {
+    color: COLORS.gold,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.8,
+    textTransform: 'uppercase',
+    marginBottom: 10,
+  },
+  settingsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    gap: 12,
+  },
+  settingsRowMaster: {
+    paddingVertical: 14,
+  },
+  settingsRowText: {
+    flex: 1,
+    gap: 3,
+  },
+  settingsRowLabel: {
+    color: COLORS.text,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  settingsRowSub: {
+    color: COLORS.muted,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  settingsIndented: {
+    paddingLeft: 12,
+    borderLeftWidth: 2,
+    borderLeftColor: COLORS.border,
+    marginLeft: 4,
+    marginTop: 4,
+  },
+  settingsSavingText: {
+    color: COLORS.muted,
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 16,
+    letterSpacing: 0.5,
   },
   webViewContainer: {
     flex: 1,
