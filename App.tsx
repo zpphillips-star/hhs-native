@@ -307,6 +307,12 @@ function isInternalDocumentNavigationUrl(url?: string | null) {
       return false;
     }
 
+    // Next/App Router subresource requests can reuse clean route paths such as
+    // /wall with an RSC query. Those are not top-frame document loads and must
+    // never be allowed to cover a successfully loaded screen with the native
+    // full-screen retry overlay.
+    if (parsed.searchParams.has('_rsc')) return false;
+
     // Treat clean app routes as document navigations, and ignore static asset
     // failures (images/fonts/icons/etc.) so they do not cover a loaded screen.
     const lastSegment = pathname.split('/').pop() || '';
@@ -314,6 +320,23 @@ function isInternalDocumentNavigationUrl(url?: string | null) {
   } catch {
     return false;
   }
+}
+
+function normalizeDocumentUrl(url?: string | null) {
+  if (!isInternalDocumentNavigationUrl(url)) return null;
+  try {
+    const parsed = new URL(url!);
+    parsed.hash = '';
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function isSameDocumentUrl(a?: string | null, b?: string | null) {
+  const normalizedA = normalizeDocumentUrl(a);
+  const normalizedB = normalizeDocumentUrl(b);
+  return !!normalizedA && !!normalizedB && normalizedA === normalizedB;
 }
 
 function isFeedbackUrl(url: string) {
@@ -523,6 +546,7 @@ export default function App() {
   const checkedUserKeyRef = useRef<string | null>(null);
   const hasNavigatedToBeerRef = useRef(false);
   const currentUrlRef = useRef(HOME_URL);
+  const pendingDocumentUrlRef = useRef<string | null>(HOME_URL);
   const [canGoBack, setCanGoBack] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [loggedInUser, setLoggedInUser] = useState<LoggedInUser | null>(null);
@@ -622,10 +646,14 @@ export default function App() {
 
   const handleNavigationStateChange = useCallback((navState: WebViewNavigation) => {
     currentUrlRef.current = navState.url || HOME_URL;
+    const documentUrl = normalizeDocumentUrl(navState.url);
+    if (documentUrl && !navState.loading) {
+      pendingDocumentUrlRef.current = null;
+    }
     setCanGoBack(navState.canGoBack);
   }, []);
 
-  const handleShouldStartLoad = useCallback((request: { url: string }) => {
+  const handleShouldStartLoad = useCallback((request: { url: string; isTopFrame?: boolean }) => {
     const { url } = request;
 
     if (
@@ -634,6 +662,10 @@ export default function App() {
       url.startsWith('blob:') ||
       isInternalUrl(url)
     ) {
+      if (request.isTopFrame !== false) {
+        const documentUrl = normalizeDocumentUrl(url);
+        if (documentUrl) pendingDocumentUrlRef.current = documentUrl;
+      }
       return true;
     }
 
@@ -965,7 +997,7 @@ export default function App() {
                   )}
 
                   {/* Version footer — helps confirm the installed build */}
-                  <Text style={styles.menuVersionFooter}>HHS v1.0.20 (21)</Text>
+                  <Text style={styles.menuVersionFooter}>HHS v1.0.22 (23)</Text>
                 </View>
               </TouchableWithoutFeedback>
             </View>
@@ -1144,22 +1176,34 @@ export default function App() {
           onMessage={handleWebViewMessage}
           onLoadEnd={() => webViewRef.current?.injectJavaScript(hhsNativeBridgeJavaScript)}
           onLoadStart={({ nativeEvent }) => {
-            if (isInternalDocumentNavigationUrl(nativeEvent.url)) setLoadFailed(false);
+            const documentUrl = normalizeDocumentUrl(nativeEvent.url);
+            if (documentUrl) {
+              pendingDocumentUrlRef.current = documentUrl;
+              setLoadFailed(false);
+            }
           }}
           onError={({ nativeEvent }) => {
-            if (isInternalDocumentNavigationUrl(nativeEvent.url)) {
+            const isPendingDocumentError =
+              isInternalDocumentNavigationUrl(nativeEvent.url) &&
+              (nativeEvent.loading || isSameDocumentUrl(nativeEvent.url, pendingDocumentUrlRef.current));
+
+            if (isPendingDocumentError) {
               console.warn('[HHS native] main document load error:', nativeEvent.url, nativeEvent.description);
               setLoadFailed(true);
             } else {
-              console.warn('[HHS native] ignored subresource load error:', nativeEvent.url, nativeEvent.description);
+              console.warn('[HHS native] ignored non-document load error:', nativeEvent.url, nativeEvent.description);
             }
           }}
           onHttpError={({ nativeEvent }) => {
-            if (nativeEvent.statusCode >= 500 && isInternalDocumentNavigationUrl(nativeEvent.url)) {
+            const isPendingDocumentHttpError =
+              isInternalDocumentNavigationUrl(nativeEvent.url) &&
+              (nativeEvent.loading || isSameDocumentUrl(nativeEvent.url, pendingDocumentUrlRef.current));
+
+            if (nativeEvent.statusCode >= 500 && isPendingDocumentHttpError) {
               console.warn('[HHS native] main document HTTP error:', nativeEvent.statusCode, nativeEvent.url);
               setLoadFailed(true);
             } else if (nativeEvent.statusCode >= 500) {
-              console.warn('[HHS native] ignored subresource HTTP error:', nativeEvent.statusCode, nativeEvent.url);
+              console.warn('[HHS native] ignored non-document HTTP error:', nativeEvent.statusCode, nativeEvent.url);
             }
           }}
           renderLoading={() => (
