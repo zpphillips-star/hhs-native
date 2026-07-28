@@ -290,6 +290,32 @@ function isInternalUrl(url: string) {
   }
 }
 
+function isInternalDocumentNavigationUrl(url?: string | null) {
+  if (!url) return false;
+
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:' || !HHS_HOSTS.has(parsed.hostname)) return false;
+
+    const pathname = parsed.pathname || '/';
+    if (
+      pathname.startsWith('/_next/') ||
+      pathname.startsWith('/api/') ||
+      pathname === '/sw.js' ||
+      pathname === '/manifest.json'
+    ) {
+      return false;
+    }
+
+    // Treat clean app routes as document navigations, and ignore static asset
+    // failures (images/fonts/icons/etc.) so they do not cover a loaded screen.
+    const lastSegment = pathname.split('/').pop() || '';
+    return !/\.[a-z0-9]{2,8}$/i.test(lastSegment);
+  } catch {
+    return false;
+  }
+}
+
 function isFeedbackUrl(url: string) {
   try {
     const parsed = new URL(url);
@@ -939,7 +965,7 @@ export default function App() {
                   )}
 
                   {/* Version footer — helps confirm the installed build */}
-                  <Text style={styles.menuVersionFooter}>HHS v1.0.18 (19)</Text>
+                  <Text style={styles.menuVersionFooter}>HHS v1.0.20 (21)</Text>
                 </View>
               </TouchableWithoutFeedback>
             </View>
@@ -1117,10 +1143,24 @@ export default function App() {
           onShouldStartLoadWithRequest={handleShouldStartLoad}
           onMessage={handleWebViewMessage}
           onLoadEnd={() => webViewRef.current?.injectJavaScript(hhsNativeBridgeJavaScript)}
-          onLoadStart={() => setLoadFailed(false)}
-          onError={() => setLoadFailed(true)}
+          onLoadStart={({ nativeEvent }) => {
+            if (isInternalDocumentNavigationUrl(nativeEvent.url)) setLoadFailed(false);
+          }}
+          onError={({ nativeEvent }) => {
+            if (isInternalDocumentNavigationUrl(nativeEvent.url)) {
+              console.warn('[HHS native] main document load error:', nativeEvent.url, nativeEvent.description);
+              setLoadFailed(true);
+            } else {
+              console.warn('[HHS native] ignored subresource load error:', nativeEvent.url, nativeEvent.description);
+            }
+          }}
           onHttpError={({ nativeEvent }) => {
-            if (nativeEvent.statusCode >= 500) setLoadFailed(true);
+            if (nativeEvent.statusCode >= 500 && isInternalDocumentNavigationUrl(nativeEvent.url)) {
+              console.warn('[HHS native] main document HTTP error:', nativeEvent.statusCode, nativeEvent.url);
+              setLoadFailed(true);
+            } else if (nativeEvent.statusCode >= 500) {
+              console.warn('[HHS native] ignored subresource HTTP error:', nativeEvent.statusCode, nativeEvent.url);
+            }
           }}
           renderLoading={() => (
             <View style={styles.loading}>
