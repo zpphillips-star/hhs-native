@@ -8,6 +8,7 @@ import {
   Linking,
   Modal,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Switch,
@@ -289,6 +290,15 @@ function isInternalUrl(url: string) {
   }
 }
 
+function isFeedbackUrl(url: string) {
+  try {
+    const parsed = new URL(url);
+    return HHS_HOSTS.has(parsed.hostname) && parsed.pathname.replace(/\/$/, '') === '/feedback';
+  } catch {
+    return false;
+  }
+}
+
 function getUserStorageKey(user: LoggedInUser) {
   return `${FIRST_LOGIN_STORAGE_PREFIX}:${(user.id || user.email).toLowerCase()}`;
 }
@@ -486,6 +496,7 @@ export default function App() {
   const webViewRef = useRef<WebView>(null);
   const checkedUserKeyRef = useRef<string | null>(null);
   const hasNavigatedToBeerRef = useRef(false);
+  const currentUrlRef = useRef(HOME_URL);
   const [canGoBack, setCanGoBack] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [loggedInUser, setLoggedInUser] = useState<LoggedInUser | null>(null);
@@ -512,6 +523,21 @@ export default function App() {
         return true;
       }
 
+      if (settingsVisible) {
+        setSettingsVisible(false);
+        return true;
+      }
+
+      if (menuOpen) {
+        setMenuOpen(false);
+        return true;
+      }
+
+      if (isFeedbackUrl(currentUrlRef.current)) {
+        webViewRef.current?.injectJavaScript(`window.location.assign('${HOME_URL}'); true;`);
+        return true;
+      }
+
       if (canGoBack) {
         webViewRef.current?.goBack();
         return true;
@@ -520,7 +546,7 @@ export default function App() {
     });
 
     return () => subscription.remove();
-  }, [canGoBack, firstLoginVisible]);
+  }, [canGoBack, firstLoginVisible, menuOpen, settingsVisible]);
 
   const prepareFirstLoginFlow = useCallback(async (user: LoggedInUser) => {
     const userStorageKey = getUserStorageKey(user);
@@ -569,6 +595,7 @@ export default function App() {
   }, []);
 
   const handleNavigationStateChange = useCallback((navState: WebViewNavigation) => {
+    currentUrlRef.current = navState.url || HOME_URL;
     setCanGoBack(navState.canGoBack);
   }, []);
 
@@ -795,9 +822,6 @@ export default function App() {
 
   const handleUpdateNotifPref = useCallback(
     async (key: keyof NotifPrefs, value: boolean) => {
-      if (!loggedInUser) return;
-      setPrefsSaving(true);
-
       let newPrefs: NotifPrefs;
 
       if (key === 'social_all') {
@@ -829,7 +853,13 @@ export default function App() {
         }
       }
 
+      // Always update the UI immediately — the Switch is controlled and will
+      // snap back if we don't call setNotifPrefs regardless of login state.
       setNotifPrefs(newPrefs);
+
+      // Remote persist only requires a logged-in user with a valid UUID.
+      if (!loggedInUser) return;
+      setPrefsSaving(true);
       await saveLocalNotifPrefs(loggedInUser, newPrefs);
       await syncPrefsToBackend(loggedInUser, newPrefs).finally(() => setPrefsSaving(false));
     },
@@ -909,7 +939,7 @@ export default function App() {
                   )}
 
                   {/* Version footer — helps confirm the installed build */}
-                  <Text style={styles.menuVersionFooter}>HHS v1.0.15 (16)</Text>
+                  <Text style={styles.menuVersionFooter}>HHS v1.0.18 (19)</Text>
                 </View>
               </TouchableWithoutFeedback>
             </View>
@@ -924,10 +954,14 @@ export default function App() {
           onRequestClose={() => setSettingsVisible(false)}
           statusBarTranslucent
         >
-          <TouchableWithoutFeedback onPress={() => setSettingsVisible(false)}>
-            <View style={styles.menuBackdrop}>
-              <TouchableWithoutFeedback>
-                <View style={[styles.menuSheet, styles.settingsSheet]}>
+          {/* Backdrop — absolute Pressable behind the sheet so Switch touches
+              reach their target without being intercepted by a parent Touchable */}
+          <View style={styles.menuBackdrop} pointerEvents="box-none">
+            <Pressable
+              style={styles.menuBackdropPressable}
+              onPress={() => setSettingsVisible(false)}
+            />
+            <View style={[styles.menuSheet, styles.settingsSheet]}>
                   <View style={styles.menuHeader}>
                     <Text style={styles.menuTitle}>Settings</Text>
                     <TouchableOpacity
@@ -1058,10 +1092,8 @@ export default function App() {
                     )}
                   </ScrollView>
                 </View>
-              </TouchableWithoutFeedback>
-            </View>
-          </TouchableWithoutFeedback>
-        </Modal>
+              </View>
+            </Modal>
         <WebView
           ref={webViewRef}
           source={{ uri: HOME_URL }}
@@ -1216,6 +1248,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.55)',
     justifyContent: 'flex-end',
   },
+  menuBackdropPressable: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 0,
+  },
   menuSheet: {
     backgroundColor: COLORS.card,
     borderTopLeftRadius: 20,
@@ -1226,6 +1262,8 @@ const styles = StyleSheet.create({
     borderColor: COLORS.borderStrong,
     paddingBottom: 32,
     paddingHorizontal: 0,
+    zIndex: 1,
+    elevation: 8,
   },
   menuHeader: {
     flexDirection: 'row',
@@ -1243,6 +1281,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 1.5,
     textTransform: 'uppercase',
+    fontFamily: 'serif',
   },
   menuCloseButton: {
     width: 30,
@@ -1271,11 +1310,13 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontSize: 15,
     fontWeight: '700',
+    fontFamily: 'serif',
   },
   menuUserEmail: {
     color: COLORS.muted,
     fontSize: 12,
     marginTop: 2,
+    fontFamily: 'serif',
   },
   menuItem: {
     flexDirection: 'row',
@@ -1297,15 +1338,18 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontSize: 16,
     fontWeight: '600',
+    fontFamily: 'serif',
   },
   menuItemSub: {
     color: COLORS.muted,
     fontSize: 12,
+    fontFamily: 'serif',
   },
   menuChevron: {
     color: COLORS.muted,
     fontSize: 22,
     fontWeight: '300',
+    fontFamily: 'serif',
   },
   menuDivider: {
     height: 1,
@@ -1321,6 +1365,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     letterSpacing: 0.5,
     opacity: 0.7,
+    fontFamily: 'serif',
   },
   // Settings modal
   settingsSheet: {
@@ -1345,6 +1390,7 @@ const styles = StyleSheet.create({
     color: COLORS.muted,
     fontSize: 13,
     lineHeight: 19,
+    fontFamily: 'serif',
   },
   settingsSection: {
     marginTop: 20,
@@ -1357,6 +1403,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.8,
     textTransform: 'uppercase',
     marginBottom: 10,
+    fontFamily: 'serif',
   },
   settingsRow: {
     flexDirection: 'row',
@@ -1378,11 +1425,13 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontSize: 15,
     fontWeight: '600',
+    fontFamily: 'serif',
   },
   settingsRowSub: {
     color: COLORS.muted,
     fontSize: 12,
     lineHeight: 17,
+    fontFamily: 'serif',
   },
   settingsIndented: {
     paddingLeft: 12,
@@ -1397,6 +1446,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 16,
     letterSpacing: 0.5,
+    fontFamily: 'serif',
   },
   webViewContainer: {
     flex: 1,
