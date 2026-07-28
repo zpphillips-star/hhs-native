@@ -19,6 +19,8 @@ import {
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { WebView, WebViewMessageEvent, WebViewNavigation } from 'react-native-webview';
+import { useAuth } from './src/features/auth/AuthProvider';
+import { NativeAppShell } from './src/navigation/NativeAppShell';
 
 const HHS_ORIGIN = 'https://hallowedhopsociety.com';
 const HOME_URL = `${HHS_ORIGIN}/`;
@@ -541,7 +543,8 @@ function getDisplayName(user: LoggedInUser): string {
   return 'Member';
 }
 
-export default function App() {
+function HhsWebViewFallbackApp() {
+  const { signOut: signOutNative } = useAuth();
   const webViewRef = useRef<WebView>(null);
   const checkedUserKeyRef = useRef<string | null>(null);
   const hasNavigatedToBeerRef = useRef(false);
@@ -843,6 +846,7 @@ export default function App() {
 
   const handleSignOut = useCallback(() => {
     setMenuOpen(false);
+    void signOutNative();
     // Clear all Supabase auth tokens from the WebView's localStorage, then reload home
     const signOutJS = `
       (function() {
@@ -861,7 +865,7 @@ export default function App() {
     setLoggedInUser(null);
     checkedUserKeyRef.current = null;
     hasNavigatedToBeerRef.current = false;
-  }, []);
+  }, [signOutNative]);
 
   const handleSignIn = useCallback(() => {
     setMenuOpen(false);
@@ -1319,6 +1323,10 @@ export default function App() {
       </SafeAreaView>
     </SafeAreaProvider>
   );
+}
+
+export default function App() {
+  return <NativeAppShell fallback={<HhsWebViewFallbackApp />} />;
 }
 
 const styles = StyleSheet.create({

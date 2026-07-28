@@ -63,7 +63,8 @@
     },
     "owner": "z-plot-industries",
     "plugins": [
-      "expo-notifications"
+      "expo-notifications",
+      "expo-secure-store"
     ],
     "scheme": "hhs",
     "description": "Hallowed Hop Society — 31 unique beers in 31 haunted days.",
