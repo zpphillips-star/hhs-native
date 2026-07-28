@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  Modal,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -12,8 +13,9 @@ import {
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
-import { fetchBeers } from './beerService';
-import type { Beer } from './types';
+import { useAuth } from '../auth/AuthProvider';
+import { fetchBeers, fetchUserBeerRating, upsertUserBeerRating } from './beerService';
+import type { Beer, BeerRating } from './types';
 
 const COLORS = {
   background: '#191726',
@@ -51,10 +53,16 @@ function getCountdownText(now: Date) {
 }
 
 export function NativeBeerScreen({ onOpenWebFallback }: NativeBeerScreenProps) {
+  const { user } = useAuth();
   const [beers, setBeers] = useState<Beer[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedBeer, setSelectedBeer] = useState<Beer | null>(null);
+  const [selectedRating, setSelectedRating] = useState<BeerRating | null>(null);
+  const [ratingLoading, setRatingLoading] = useState(false);
+  const [ratingSaving, setRatingSaving] = useState(false);
+  const [ratingError, setRatingError] = useState<string | null>(null);
 
   const now = useMemo(() => new Date(), []);
   const isOctober = now.getMonth() === 9;
@@ -68,6 +76,27 @@ export function NativeBeerScreen({ onOpenWebFallback }: NativeBeerScreenProps) {
   }, [beers]);
 
   const todayBeer = todayDay ? beerMap.get(todayDay) ?? null : null;
+
+  const loadSelectedRating = useCallback(async (beer: Beer | null, userId: string | undefined) => {
+    setSelectedRating(null);
+    setRatingError(null);
+
+    if (!beer || !userId) {
+      setRatingLoading(false);
+      return;
+    }
+
+    setRatingLoading(true);
+    try {
+      const rating = await fetchUserBeerRating(userId, beer.id);
+      setSelectedRating(rating);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not load your rating.';
+      setRatingError(message);
+    } finally {
+      setRatingLoading(false);
+    }
+  }, []);
 
   const loadBeers = useCallback(async (showRefresh = false) => {
     if (showRefresh) {
@@ -92,6 +121,37 @@ export function NativeBeerScreen({ onOpenWebFallback }: NativeBeerScreenProps) {
   useEffect(() => {
     void loadBeers();
   }, [loadBeers]);
+
+  useEffect(() => {
+    void loadSelectedRating(selectedBeer, user?.id);
+  }, [loadSelectedRating, selectedBeer, user?.id]);
+
+  const openBeerDetail = (beer: Beer) => {
+    setSelectedBeer(beer);
+  };
+
+  const closeBeerDetail = () => {
+    setSelectedBeer(null);
+    setSelectedRating(null);
+    setRatingError(null);
+    setRatingSaving(false);
+  };
+
+  const handleRateSelectedBeer = async (stars: number) => {
+    if (!user || !selectedBeer || ratingSaving) return;
+
+    setRatingSaving(true);
+    setRatingError(null);
+    try {
+      const rating = await upsertUserBeerRating(user.id, selectedBeer.id, stars);
+      setSelectedRating(rating);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not save your rating.';
+      setRatingError(message);
+    } finally {
+      setRatingSaving(false);
+    }
+  };
 
   const renderToday = () => {
     if (isOctober && !todayBeer) {
@@ -127,6 +187,9 @@ export function NativeBeerScreen({ onOpenWebFallback }: NativeBeerScreenProps) {
         <Text style={styles.breweryTitle}>{todayBeer.brewery}</Text>
         {meta ? <Text style={styles.metaText}>{meta}</Text> : null}
         {todayBeer.description ? <Text style={styles.descriptionText}>{todayBeer.description}</Text> : null}
+        <TouchableOpacity style={styles.detailButton} onPress={() => openBeerDetail(todayBeer)} activeOpacity={0.85}>
+          <Text style={styles.detailButtonText}>View Details</Text>
+        </TouchableOpacity>
         {(todayBeer.beer_fact || todayBeer.brewery_fact) ? (
           <View style={styles.factCard}>
             {todayBeer.beer_fact ? (
@@ -167,13 +230,19 @@ export function NativeBeerScreen({ onOpenWebFallback }: NativeBeerScreenProps) {
           const shouldReveal = Boolean(beer && (isPast || isToday));
 
           return (
-            <View
+            <TouchableOpacity
               key={day}
               style={[
                 styles.listItem,
                 isToday && styles.todayListItem,
                 isPast && !isToday && styles.pastListItem,
+                shouldReveal && styles.selectableListItem,
               ]}
+              onPress={() => {
+                if (shouldReveal && beer) openBeerDetail(beer);
+              }}
+              activeOpacity={shouldReveal ? 0.82 : 1}
+              disabled={!shouldReveal || !beer}
             >
               <Text style={[styles.dayNumber, isToday && styles.todayText]}>{day}</Text>
               <View style={styles.listText}>
@@ -191,10 +260,96 @@ export function NativeBeerScreen({ onOpenWebFallback }: NativeBeerScreenProps) {
                   <Text style={styles.todayBadgeText}>TODAY</Text>
                 </View>
               ) : null}
-            </View>
+            </TouchableOpacity>
           );
         })}
       </View>
+    );
+  };
+
+  const renderDetailModal = () => {
+    if (!selectedBeer) return null;
+
+    const meta = formatBeerMeta(selectedBeer);
+
+    return (
+      <Modal visible transparent animationType="fade" onRequestClose={closeBeerDetail}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalDayLabel}>Day {selectedBeer.day_number} · October {selectedBeer.day_number}</Text>
+              <TouchableOpacity style={styles.closeButton} onPress={closeBeerDetail} accessibilityLabel="Close beer detail">
+                <Text style={styles.closeButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView contentContainerStyle={styles.modalScrollContent}>
+              {selectedBeer.image_url ? (
+                <Image source={{ uri: selectedBeer.image_url }} style={styles.detailImage} resizeMode="cover" />
+              ) : null}
+              <Text style={styles.modalBeerTitle}>{selectedBeer.name}</Text>
+              <Text style={styles.modalBreweryTitle}>{selectedBeer.brewery}</Text>
+              {meta ? <Text style={styles.modalMetaText}>{meta}</Text> : null}
+              {selectedBeer.description ? (
+                <Text style={styles.modalDescriptionText}>{selectedBeer.description}</Text>
+              ) : null}
+
+              {(selectedBeer.beer_fact || selectedBeer.brewery_fact) ? (
+                <View style={styles.factCard}>
+                  {selectedBeer.beer_fact ? (
+                    <View>
+                      <Text style={styles.factLabel}>The Beer</Text>
+                      <Text style={styles.factText}>{selectedBeer.beer_fact}</Text>
+                    </View>
+                  ) : null}
+                  {selectedBeer.beer_fact && selectedBeer.brewery_fact ? <View style={styles.divider} /> : null}
+                  {selectedBeer.brewery_fact ? (
+                    <View>
+                      <Text style={styles.factLabel}>The Brewery</Text>
+                      <Text style={styles.factText}>{selectedBeer.brewery_fact}</Text>
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
+
+              <View style={styles.ratingCard}>
+                <Text style={styles.factLabel}>{selectedRating ? 'Your Rating' : 'Rate This Beer'}</Text>
+                {user ? (
+                  <>
+                    {ratingLoading ? (
+                      <View style={styles.ratingLoadingRow}>
+                        <ActivityIndicator color={COLORS.gold} />
+                        <Text style={styles.ratingHelpText}>Loading your rating...</Text>
+                      </View>
+                    ) : (
+                      <View style={styles.starRow}>
+                        {[1, 2, 3, 4, 5].map((star) => {
+                          const active = star <= (selectedRating?.stars ?? 0);
+                          return (
+                            <TouchableOpacity
+                              key={star}
+                              style={[styles.starButton, active && styles.starButtonActive]}
+                              onPress={() => void handleRateSelectedBeer(star)}
+                              activeOpacity={0.8}
+                              disabled={ratingSaving}
+                            >
+                              <Text style={[styles.starText, active && styles.starTextActive]}>★</Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    )}
+                    {ratingSaving ? <Text style={styles.ratingHelpText}>Saving...</Text> : null}
+                    {ratingError ? <Text style={styles.ratingErrorText}>{ratingError}</Text> : null}
+                  </>
+                ) : (
+                  <Text style={styles.ratingHelpText}>Sign in on the web view to rate this beer.</Text>
+                )}
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     );
   };
 
@@ -251,6 +406,7 @@ export function NativeBeerScreen({ onOpenWebFallback }: NativeBeerScreenProps) {
             </>
           ) : null}
         </ScrollView>
+        {renderDetailModal()}
       </SafeAreaView>
     </SafeAreaProvider>
   );
@@ -428,6 +584,22 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     marginBottom: 14,
   },
+  detailButton: {
+    alignSelf: 'flex-start',
+    borderColor: COLORS.borderStrong,
+    borderRadius: 999,
+    borderWidth: 1,
+    marginBottom: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+  },
+  detailButtonText: {
+    color: COLORS.gold,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+  },
   factCard: {
     backgroundColor: COLORS.card,
     borderColor: COLORS.border,
@@ -495,6 +667,9 @@ const styles = StyleSheet.create({
   pastListItem: {
     opacity: 0.68,
   },
+  selectableListItem: {
+    borderColor: COLORS.borderStrong,
+  },
   dayNumber: {
     color: COLORS.muted,
     fontSize: 22,
@@ -535,6 +710,132 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 1,
+  },
+  modalBackdrop: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.74)',
+    flex: 1,
+    justifyContent: 'center',
+    padding: 18,
+  },
+  modalCard: {
+    backgroundColor: COLORS.card,
+    borderColor: COLORS.borderStrong,
+    borderRadius: 18,
+    borderWidth: 1,
+    maxHeight: '86%',
+    overflow: 'hidden',
+    width: '100%',
+  },
+  modalHeader: {
+    alignItems: 'center',
+    borderBottomColor: COLORS.border,
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+  },
+  modalDayLabel: {
+    color: COLORS.muted,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+  },
+  closeButton: {
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+  },
+  closeButtonText: {
+    color: COLORS.muted,
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  modalScrollContent: {
+    padding: 18,
+  },
+  detailImage: {
+    backgroundColor: COLORS.cardAlt,
+    borderRadius: 14,
+    height: 190,
+    marginBottom: 16,
+    width: '100%',
+  },
+  modalBeerTitle: {
+    color: COLORS.text,
+    fontSize: 26,
+    fontWeight: '700',
+    lineHeight: 31,
+    marginBottom: 6,
+  },
+  modalBreweryTitle: {
+    color: COLORS.gold,
+    fontSize: 18,
+    marginBottom: 4,
+  },
+  modalMetaText: {
+    color: COLORS.muted,
+    fontSize: 14,
+    marginBottom: 14,
+  },
+  modalDescriptionText: {
+    borderTopColor: COLORS.border,
+    borderTopWidth: 1,
+    color: COLORS.text,
+    fontSize: 15,
+    lineHeight: 24,
+    marginBottom: 16,
+    paddingTop: 14,
+  },
+  ratingCard: {
+    backgroundColor: COLORS.cardAlt,
+    borderColor: COLORS.border,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginTop: 14,
+    padding: 16,
+  },
+  ratingLoadingRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+  },
+  starRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  starButton: {
+    alignItems: 'center',
+    borderColor: COLORS.border,
+    borderRadius: 999,
+    borderWidth: 1,
+    height: 42,
+    justifyContent: 'center',
+    width: 42,
+  },
+  starButtonActive: {
+    backgroundColor: 'rgba(217, 124, 43, 0.16)',
+    borderColor: COLORS.gold,
+  },
+  starText: {
+    color: COLORS.muted,
+    fontSize: 22,
+  },
+  starTextActive: {
+    color: COLORS.gold,
+  },
+  ratingHelpText: {
+    color: COLORS.muted,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 10,
+  },
+  ratingErrorText: {
+    color: '#ffb4a8',
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 10,
   },
 });
 

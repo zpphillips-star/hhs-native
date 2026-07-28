@@ -12,3 +12,12 @@ export type Beer = {
   created_at: string;
 };
 
+export type BeerRating = {
+  id: string;
+  user_id: string;
+  beer_id: string;
+  stars: number;
+  notes: string | null;
+  created_at: string;
+};
+
