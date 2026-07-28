@@ -27,6 +27,7 @@ const HHS_ORIGIN = 'https://hallowedhopsociety.com';
 const HOME_URL = `${HHS_ORIGIN}/`;
 const BEER_URL = `${HHS_ORIGIN}/beers`;
 const HHS_HOSTS = new Set(['hallowedhopsociety.com', 'www.hallowedhopsociety.com']);
+const NATIVE_FALLBACK_PATHS = new Set(['/wall', '/leaderboard']);
 const FIRST_LOGIN_STORAGE_PREFIX = '@hhs:first-login';
 const NOTIF_PREFS_STORAGE_PREFIX = '@hhs:notif-prefs';
 const PUSH_TOKEN_STORAGE_PREFIX = '@hhs:push-token';
@@ -96,7 +97,13 @@ type FirstLoginRecord = {
 
 function getInitialWebUrl(initialPath?: string) {
   if (!initialPath) return HOME_URL;
-  return initialPath.startsWith('/') ? `${HHS_ORIGIN}${initialPath}` : HOME_URL;
+  if (!initialPath.startsWith('/')) return HOME_URL;
+
+  const url = new URL(initialPath, HHS_ORIGIN);
+  if (NATIVE_FALLBACK_PATHS.has(url.pathname.replace(/\/$/, ''))) {
+    url.searchParams.set('hhs_native_fallback', '1');
+  }
+  return url.toString();
 }
 
 const MEMBERSHIP_PACKAGES: MembershipPackage[] = [
@@ -157,6 +164,31 @@ const hhsNativeBridgeJavaScript = `
           node.setAttribute('data-hhs-native-hidden', 'true');
         }
       });
+    }
+
+    function isNativeFallbackPage() {
+      try {
+        var path = window.location.pathname.replace(/\\/$/, '');
+        return (path === '/wall' || path === '/leaderboard') &&
+          new URLSearchParams(window.location.search).get('hhs_native_fallback') === '1';
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function hideNativeFallbackChrome() {
+      if (!isNativeFallbackPage()) return;
+      var styleId = 'hhs-native-fallback-hide-chrome';
+      if (!document.getElementById(styleId)) {
+        var style = document.createElement('style');
+        style.id = styleId;
+        style.textContent = 'nav{display:none!important;visibility:hidden!important;}';
+        document.head.appendChild(style);
+      }
+      document.documentElement.setAttribute('data-hhs-native-fallback', 'true');
+      try {
+        sessionStorage.setItem('__hhs_native_fallback__', '1');
+      } catch (_) {}
     }
 
     function normalizeUser(rawUser) {
@@ -252,6 +284,7 @@ const hhsNativeBridgeJavaScript = `
       try { localStorage.setItem('__hhs_native_app__', '1'); } catch (_) {}
       // Mark setup as done so /welcome and SetupBanner/SetupGuide never show.
       try { localStorage.setItem('hhs_setup_done', '1'); } catch (_) {}
+      hideNativeFallbackChrome();
       hideWebInstallPrompts();
       postLoggedInUser();
       ensureNativeHamburger();
@@ -260,12 +293,14 @@ const hhsNativeBridgeJavaScript = `
         var attempts = 0;
         var intervalId = window.setInterval(function () {
           attempts += 1;
+          hideNativeFallbackChrome();
           hideWebInstallPrompts();
           postLoggedInUser();
           ensureNativeHamburger();
           if (attempts >= 30) window.clearInterval(intervalId);
         }, 2000);
         var observer = new MutationObserver(function () {
+          hideNativeFallbackChrome();
           hideWebInstallPrompts();
           postLoggedInUser();
           ensureNativeHamburger();
@@ -547,6 +582,7 @@ function HhsWebViewFallbackApp({ initialPath }: { initialPath?: string }) {
   const hasNavigatedToBeerRef = useRef(false);
   const currentUrlRef = useRef(initialUrl);
   const pendingDocumentUrlRef = useRef<string | null>(initialUrl);
+  const completedDocumentUrlRef = useRef<string | null>(null);
   const [canGoBack, setCanGoBack] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [loggedInUser, setLoggedInUser] = useState<LoggedInUser | null>(null);
@@ -648,7 +684,9 @@ function HhsWebViewFallbackApp({ initialPath }: { initialPath?: string }) {
     currentUrlRef.current = navState.url || HOME_URL;
     const documentUrl = normalizeDocumentUrl(navState.url);
     if (documentUrl && !navState.loading) {
+      completedDocumentUrlRef.current = documentUrl;
       pendingDocumentUrlRef.current = null;
+      setLoadFailed(false);
     }
     setCanGoBack(navState.canGoBack);
   }, []);
@@ -1185,15 +1223,17 @@ function HhsWebViewFallbackApp({ initialPath }: { initialPath?: string }) {
           onLoadEnd={() => webViewRef.current?.injectJavaScript(hhsNativeBridgeJavaScript)}
           onLoadStart={({ nativeEvent }) => {
             const documentUrl = normalizeDocumentUrl(nativeEvent.url);
-            if (documentUrl) {
+            if (documentUrl && isSameDocumentUrl(documentUrl, pendingDocumentUrlRef.current)) {
               pendingDocumentUrlRef.current = documentUrl;
               setLoadFailed(false);
             }
           }}
           onError={({ nativeEvent }) => {
+            const documentUrl = normalizeDocumentUrl(nativeEvent.url);
             const isPendingDocumentError =
-              isInternalDocumentNavigationUrl(nativeEvent.url) &&
-              (nativeEvent.loading || isSameDocumentUrl(nativeEvent.url, pendingDocumentUrlRef.current));
+              !!documentUrl &&
+              isSameDocumentUrl(documentUrl, pendingDocumentUrlRef.current) &&
+              !isSameDocumentUrl(documentUrl, completedDocumentUrlRef.current);
 
             if (isPendingDocumentError) {
               console.warn('[HHS native] main document load error:', nativeEvent.url, nativeEvent.description);
@@ -1203,9 +1243,11 @@ function HhsWebViewFallbackApp({ initialPath }: { initialPath?: string }) {
             }
           }}
           onHttpError={({ nativeEvent }) => {
+            const documentUrl = normalizeDocumentUrl(nativeEvent.url);
             const isPendingDocumentHttpError =
-              isInternalDocumentNavigationUrl(nativeEvent.url) &&
-              (nativeEvent.loading || isSameDocumentUrl(nativeEvent.url, pendingDocumentUrlRef.current));
+              !!documentUrl &&
+              isSameDocumentUrl(documentUrl, pendingDocumentUrlRef.current) &&
+              !isSameDocumentUrl(documentUrl, completedDocumentUrlRef.current);
 
             if (nativeEvent.statusCode >= 500 && isPendingDocumentHttpError) {
               console.warn('[HHS native] main document HTTP error:', nativeEvent.statusCode, nativeEvent.url);
