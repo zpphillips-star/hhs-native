@@ -96,10 +96,19 @@ type FirstLoginRecord = {
 };
 
 function getInitialWebUrl(initialPath?: string) {
-  if (!initialPath) return HOME_URL;
-  if (!initialPath.startsWith('/')) return HOME_URL;
+  if (!initialPath) {
+    const url = new URL(HOME_URL);
+    url.searchParams.set('hhs_app', '1');
+    return url.toString();
+  }
+  if (!initialPath.startsWith('/')) {
+    const url = new URL(HOME_URL);
+    url.searchParams.set('hhs_app', '1');
+    return url.toString();
+  }
 
   const url = new URL(initialPath, HHS_ORIGIN);
+  url.searchParams.set('hhs_app', '1');
   if (NATIVE_FALLBACK_PATHS.has(url.pathname.replace(/\/$/, ''))) {
     url.searchParams.set('hhs_native_fallback', '1');
   }
@@ -166,23 +175,25 @@ const hhsNativeBridgeJavaScript = `
       });
     }
 
-    function isNativeFallbackPage() {
+    function isNativeAppModePage() {
       try {
-        var path = window.location.pathname.replace(/\\/$/, '');
-        return (path === '/wall' || path === '/leaderboard') &&
-          new URLSearchParams(window.location.search).get('hhs_native_fallback') === '1';
+        var params = new URLSearchParams(window.location.search);
+        return params.get('hhs_app') === '1' ||
+          params.get('hhs_native_fallback') === '1' ||
+          window.__HHS_NATIVE_APP__ === true ||
+          localStorage.getItem('__hhs_native_app__') === '1';
       } catch (_) {
         return false;
       }
     }
 
     function hideNativeFallbackChrome() {
-      if (!isNativeFallbackPage()) return;
+      if (!isNativeAppModePage()) return;
       var styleId = 'hhs-native-fallback-hide-chrome';
       if (!document.getElementById(styleId)) {
         var style = document.createElement('style');
         style.id = styleId;
-        style.textContent = 'nav{display:none!important;visibility:hidden!important;}';
+        style.textContent = 'nav,[data-hhs-web-nav="true"],[data-hhs-native-hidden="true"]{display:none!important;visibility:hidden!important;}body{overscroll-behavior:none;}';
         document.head.appendChild(style);
       }
       document.documentElement.setAttribute('data-hhs-native-fallback', 'true');
@@ -1043,7 +1054,7 @@ function HhsWebViewFallbackApp({ initialPath }: { initialPath?: string }) {
                   </TouchableOpacity>
 
                   {/* Version footer — helps confirm the installed build */}
-                  <Text style={styles.menuVersionFooter}>HHS v1.0.22 (23)</Text>
+                  <Text style={styles.menuVersionFooter}>HHS v1.0.27 (28)</Text>
                 </View>
               </TouchableWithoutFeedback>
             </View>
@@ -1085,7 +1096,7 @@ function HhsWebViewFallbackApp({ initialPath }: { initialPath?: string }) {
                     {!loggedInUser && (
                       <View style={styles.settingsSignInNote}>
                         <Text style={styles.settingsSignInNoteText}>
-                          Sign in to save notification settings to your account.
+                          Sign in to change notification settings. Signed-out switches are locked so they do not appear to save and then snap back.
                         </Text>
                       </View>
                     )}
@@ -1101,6 +1112,7 @@ function HhsWebViewFallbackApp({ initialPath }: { initialPath?: string }) {
                           </Text>
                         </View>
                         <Switch
+                          disabled={!loggedInUser || prefsSaving}
                           value={notifPrefs.daily_beer}
                           onValueChange={v => void handleUpdateNotifPref('daily_beer', v)}
                           thumbColor={notifPrefs.daily_beer ? COLORS.gold : COLORS.muted}
@@ -1123,6 +1135,7 @@ function HhsWebViewFallbackApp({ initialPath }: { initialPath?: string }) {
                           </Text>
                         </View>
                         <Switch
+                          disabled={!loggedInUser || prefsSaving}
                           value={notifPrefs.social_all}
                           onValueChange={v => void handleUpdateNotifPref('social_all', v)}
                           thumbColor={notifPrefs.social_all ? COLORS.gold : COLORS.muted}
@@ -1139,6 +1152,7 @@ function HhsWebViewFallbackApp({ initialPath }: { initialPath?: string }) {
                             <Text style={styles.settingsRowSub}>When someone comments on any post</Text>
                           </View>
                           <Switch
+                            disabled={!loggedInUser || prefsSaving}
                             value={notifPrefs.social_new_comment}
                             onValueChange={v => void handleUpdateNotifPref('social_new_comment', v)}
                             thumbColor={notifPrefs.social_new_comment ? COLORS.gold : COLORS.muted}
@@ -1153,6 +1167,7 @@ function HhsWebViewFallbackApp({ initialPath }: { initialPath?: string }) {
                             <Text style={styles.settingsRowSub}>When someone reacts to any post</Text>
                           </View>
                           <Switch
+                            disabled={!loggedInUser || prefsSaving}
                             value={notifPrefs.social_new_reaction}
                             onValueChange={v => void handleUpdateNotifPref('social_new_reaction', v)}
                             thumbColor={notifPrefs.social_new_reaction ? COLORS.gold : COLORS.muted}
@@ -1167,6 +1182,7 @@ function HhsWebViewFallbackApp({ initialPath }: { initialPath?: string }) {
                             <Text style={styles.settingsRowSub}>When someone reacts to your post</Text>
                           </View>
                           <Switch
+                            disabled={!loggedInUser || prefsSaving}
                             value={notifPrefs.social_reaction_to_your_items}
                             onValueChange={v => void handleUpdateNotifPref('social_reaction_to_your_items', v)}
                             thumbColor={notifPrefs.social_reaction_to_your_items ? COLORS.gold : COLORS.muted}
@@ -1181,6 +1197,7 @@ function HhsWebViewFallbackApp({ initialPath }: { initialPath?: string }) {
                             <Text style={styles.settingsRowSub}>When someone comments on your post</Text>
                           </View>
                           <Switch
+                            disabled={!loggedInUser || prefsSaving}
                             value={notifPrefs.social_comment_on_your_items}
                             onValueChange={v => void handleUpdateNotifPref('social_comment_on_your_items', v)}
                             thumbColor={notifPrefs.social_comment_on_your_items ? COLORS.gold : COLORS.muted}

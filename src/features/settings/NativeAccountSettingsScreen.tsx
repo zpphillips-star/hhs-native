@@ -34,10 +34,6 @@ import { HHS_COLORS, HHS_STYLES, HHS_TYPOGRAPHY } from '../../theme/hhsTheme';
 
 const COLORS = HHS_COLORS;
 
-type NativeAccountSettingsScreenProps = {
-  onOpenWebFallback: (path?: string) => void;
-};
-
 function formatTier(tier: string | null | undefined) {
   if (tier === 'hallowed') return 'Hallowed · 31 beers';
   if (tier === 'oddballs') return 'Oddballs · 16 beers';
@@ -85,7 +81,7 @@ function PreferenceRow({ label, description, enabled, indented, disabled, onValu
   );
 }
 
-export function NativeAccountSettingsScreen({ onOpenWebFallback }: NativeAccountSettingsScreenProps) {
+export function NativeAccountSettingsScreen() {
   const { configured, loading: authLoading, signIn, signOut, user } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -274,9 +270,6 @@ export function NativeAccountSettingsScreen({ onOpenWebFallback }: NativeAccount
         <Text style={styles.primaryButtonText}>{signingIn ? 'Signing in...' : 'Sign In'}</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity activeOpacity={0.85} onPress={() => onOpenWebFallback('/auth')} style={styles.secondaryButton}>
-        <Text style={styles.secondaryButtonText}>Open Web Sign-In / Request Access</Text>
-      </TouchableOpacity>
     </View>
   );
 
@@ -400,9 +393,6 @@ export function NativeAccountSettingsScreen({ onOpenWebFallback }: NativeAccount
         >
           <Text style={styles.secondaryButtonText}>{signingOut ? 'Signing out...' : 'Sign Out'}</Text>
         </TouchableOpacity>
-        <TouchableOpacity activeOpacity={0.85} onPress={() => onOpenWebFallback('/')} style={styles.textButton}>
-          <Text style={styles.textButtonText}>Open Web Home</Text>
-        </TouchableOpacity>
       </View>
     </>
   );
@@ -441,9 +431,6 @@ export function NativeAccountSettingsScreen({ onOpenWebFallback }: NativeAccount
               <Text style={styles.appKicker}>Hallowed Hop Society</Text>
               <Text style={styles.headerTitle}>The Settings</Text>
             </View>
-            <TouchableOpacity activeOpacity={0.8} onPress={() => onOpenWebFallback()} style={styles.webFallbackButton}>
-              <Text style={styles.webFallbackText}>Web</Text>
-            </TouchableOpacity>
           </View>
 
           {authLoading || loadingDetails ? (
