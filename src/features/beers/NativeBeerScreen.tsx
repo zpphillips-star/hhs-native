@@ -553,7 +553,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWebFallback }: Nativ
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <StatusBar style="light" backgroundColor={COLORS.background} />
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scrollContent, mode === 'calendar' && styles.calendarScrollContent]}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -625,6 +625,9 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 20,
     paddingBottom: 36,
+  },
+  calendarScrollContent: {
+    paddingTop: 8,
   },
   header: {
     alignItems: 'center',

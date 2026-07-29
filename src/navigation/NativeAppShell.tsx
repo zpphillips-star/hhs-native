@@ -1,14 +1,15 @@
-import React, { useState } from 'react';
-import { Image, Modal, StyleSheet, Text, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { BackHandler, Image, Modal, Platform, StyleSheet, Text, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
 
 import { HHS_WEB_ORIGIN, USE_NATIVE_BEER_SCREEN } from '../config/env';
 import { AuthProvider } from '../features/auth/AuthProvider';
 import { useAuth } from '../features/auth/AuthProvider';
+import { NativeBeerScreen } from '../features/beers/NativeBeerScreen';
 import { NativeAccountSettingsScreen } from '../features/settings/NativeAccountSettingsScreen';
 import { HHS_COLORS, HHS_STYLES, HHS_TYPOGRAPHY } from '../theme/hhsTheme';
 
 type NativeTabId = 'calendar' | 'wall' | 'yourBeer' | 'rankings' | 'settings';
-type NativeContentMode = NativeTabId | 'aboutHhs';
+type NativeContentMode = NativeTabId | 'auth' | 'settingsPage' | 'aboutHhs' | 'feedback';
 
 type NativeTab = {
   id: NativeTabId;
@@ -20,7 +21,7 @@ type NativeTab = {
 const NATIVE_TABS: readonly NativeTab[] = [
   { id: 'calendar', label: 'The\nCalendar', webPath: '/beers?hhs_app=1&hhs_view=calendar' },
   { id: 'wall', label: 'The\nWall', webPath: '/wall?hhs_app=1' },
-  { id: 'yourBeer', label: 'Your Beer', center: true, webPath: '/beers?hhs_app=1&hhs_view=today' },
+  { id: 'yourBeer', label: '', center: true, webPath: '/beers?hhs_app=1&hhs_view=today' },
   { id: 'rankings', label: 'The\nRankings', webPath: '/leaderboard?hhs_app=1' },
   { id: 'settings', label: 'The\nSettings' },
 ] as const;
@@ -53,6 +54,33 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
   const selectedRoute = NATIVE_TABS.find((tab) => tab.id === selectedTab) ?? NATIVE_TABS[0];
   const activeWebPath = webFallbackPath ?? selectedRoute.webPath;
 
+  const returnToYourBeer = () => {
+    setSettingsMenuVisible(false);
+    setSelectedTab('yourBeer');
+    setContentMode('yourBeer');
+    setWebFallbackPath(null);
+  };
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return undefined;
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (settingsMenuVisible) {
+        setSettingsMenuVisible(false);
+        return true;
+      }
+
+      if (contentMode === 'auth' || contentMode === 'settingsPage' || contentMode === 'aboutHhs' || contentMode === 'feedback') {
+        returnToYourBeer();
+        return true;
+      }
+
+      return false;
+    });
+
+    return () => subscription.remove();
+  }, [contentMode, settingsMenuVisible]);
+
   const handleSelectTab = (tab: NativeTab) => {
     if (tab.id === 'settings') {
       setSettingsMenuVisible(true);
@@ -67,7 +95,14 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
   const openNativeSettings = () => {
     setSettingsMenuVisible(false);
     setSelectedTab('settings');
-    setContentMode('settings');
+    setContentMode('settingsPage');
+    setWebFallbackPath(null);
+  };
+
+  const openAuth = () => {
+    setSettingsMenuVisible(false);
+    setSelectedTab('settings');
+    setContentMode('auth');
     setWebFallbackPath(null);
   };
 
@@ -75,14 +110,18 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
     setSettingsMenuVisible(false);
     setSelectedTab('settings');
     setContentMode('aboutHhs');
-    setWebFallbackPath('/?hhs_app=1&hhs_view=about');
+    setWebFallbackPath(null);
   };
 
   const openFeedback = () => {
     setSettingsMenuVisible(false);
     setSelectedTab('settings');
-    setContentMode('settings');
-    setWebFallbackPath('/feedback');
+    setContentMode('feedback');
+    setWebFallbackPath(null);
+  };
+
+  const openBeerWebFallback = (path?: string) => {
+    setWebFallbackPath(path ?? selectedRoute.webPath ?? null);
   };
 
   return (
@@ -95,10 +134,18 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
       */}
       <View style={styles.shell}>
         <View style={styles.content} key={`${selectedRoute.id}:${activeWebPath ?? 'native'}`}>
-          {contentMode === 'settings' && !webFallbackPath ? (
-            <NativeAccountSettingsScreen />
+          {contentMode === 'calendar' && !webFallbackPath ? (
+            <NativeBeerScreen mode="calendar" onOpenWebFallback={openBeerWebFallback} />
+          ) : contentMode === 'yourBeer' && !webFallbackPath ? (
+            <NativeBeerScreen mode="yourBeer" onOpenWebFallback={openBeerWebFallback} />
+          ) : contentMode === 'auth' && !webFallbackPath ? (
+            <NativeAccountSettingsScreen mode="auth" onBack={returnToYourBeer} onOpenAuth={openAuth} />
+          ) : contentMode === 'settingsPage' && !webFallbackPath ? (
+            <NativeAccountSettingsScreen mode="settings" onBack={returnToYourBeer} onOpenAuth={openAuth} />
           ) : contentMode === 'aboutHhs' && !webFallbackPath ? (
-            fallback('/?hhs_app=1&hhs_view=about')
+            <NativeAccountSettingsScreen mode="about" onBack={returnToYourBeer} onOpenAuth={openAuth} />
+          ) : contentMode === 'feedback' && !webFallbackPath ? (
+            <NativeAccountSettingsScreen mode="feedback" onBack={returnToYourBeer} onOpenAuth={openAuth} />
           ) : (
             fallback(activeWebPath)
           )}
@@ -118,9 +165,11 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
                     <Image source={HHS_LOGO} style={styles.logoImage} resizeMode="contain" />
                   </View>
                 ) : null}
-                <Text style={[styles.tabText, tab.center && styles.centerTabText, active && styles.tabTextActive]}>
-                  {tab.label}
-                </Text>
+                {tab.label ? (
+                  <Text style={[styles.tabText, tab.center && styles.centerTabText, active && styles.tabTextActive]}>
+                    {tab.label}
+                  </Text>
+                ) : null}
               </TouchableOpacity>
             );
           })}
@@ -137,11 +186,14 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
               <TouchableWithoutFeedback>
                 <View style={styles.menuSheet}>
                   <View style={styles.menuHandle} />
+                  <View style={styles.menuLogoCircle}>
+                    <Image source={HHS_LOGO} style={styles.menuLogoImage} resizeMode="contain" />
+                  </View>
                   <Text style={styles.menuKicker}>Hallowed Hop Society</Text>
                   <Text style={styles.menuTitle}>The Settings</Text>
                   <Text style={styles.menuBody}>Choose a Society action.</Text>
 
-                  <TouchableOpacity style={styles.menuItem} onPress={openNativeSettings} activeOpacity={0.78}>
+                  <TouchableOpacity style={styles.menuItem} onPress={openAuth} activeOpacity={0.78}>
                     <Text style={styles.menuItemText}>{user?.email ? 'Sign out' : 'Sign in'}</Text>
                     <Text style={styles.menuChevron}>›</Text>
                   </TouchableOpacity>
@@ -270,6 +322,24 @@ const styles = StyleSheet.create({
     height: 4,
     marginBottom: 18,
     width: 42,
+  },
+  menuLogoCircle: {
+    alignItems: 'center',
+    alignSelf: 'center',
+    backgroundColor: '#08070d',
+    borderColor: HHS_COLORS.gold,
+    borderRadius: 34,
+    borderWidth: 2,
+    height: 62,
+    justifyContent: 'center',
+    marginBottom: 12,
+    overflow: 'hidden',
+    width: 62,
+  },
+  menuLogoImage: {
+    height: 96,
+    transform: [{ translateY: 4 }],
+    width: 96,
   },
   menuKicker: {
     ...HHS_TYPOGRAPHY.kicker,

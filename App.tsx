@@ -1054,7 +1054,7 @@ function HhsWebViewFallbackApp({ initialPath }: { initialPath?: string }) {
                   </TouchableOpacity>
 
                   {/* Version footer — helps confirm the installed build */}
-                  <Text style={styles.menuVersionFooter}>HHS v1.0.27 (28)</Text>
+                  <Text style={styles.menuVersionFooter}>HHS v1.0.28 (29)</Text>
                 </View>
               </TouchableWithoutFeedback>
             </View>
