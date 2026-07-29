@@ -3,9 +3,6 @@ import { BackHandler, Image, Modal, Platform, StyleSheet, Text, TouchableOpacity
 
 import { HHS_WEB_ORIGIN, USE_NATIVE_BEER_SCREEN } from '../config/env';
 import { AuthProvider } from '../features/auth/AuthProvider';
-import { useAuth } from '../features/auth/AuthProvider';
-import { NativeBeerScreen } from '../features/beers/NativeBeerScreen';
-import { NativeAccountSettingsScreen } from '../features/settings/NativeAccountSettingsScreen';
 import { HHS_COLORS, HHS_STYLES, HHS_TYPOGRAPHY } from '../theme/hhsTheme';
 
 type NativeTabId = 'calendar' | 'wall' | 'yourBeer' | 'rankings' | 'settings';
@@ -20,9 +17,9 @@ type NativeTab = {
 
 const NATIVE_TABS: readonly NativeTab[] = [
   { id: 'calendar', label: 'The\nCalendar', webPath: '/beers?hhs_app=1&hhs_view=calendar' },
-  { id: 'wall', label: 'The\nWall', webPath: '/wall?hhs_app=1' },
+  { id: 'wall', label: 'The\nWall', webPath: '/wall?hhs_app=1&hhs_native_fallback=1' },
   { id: 'yourBeer', label: '', center: true, webPath: '/beers?hhs_app=1&hhs_view=today' },
-  { id: 'rankings', label: 'The\nRankings', webPath: '/leaderboard?hhs_app=1' },
+  { id: 'rankings', label: 'The\nRankings', webPath: '/leaderboard?hhs_app=1&hhs_native_fallback=1' },
   { id: 'settings', label: 'The\nSettings' },
 ] as const;
 
@@ -45,20 +42,17 @@ export function NativeAppShell({ fallback }: NativeAppShellProps) {
 }
 
 function NativeAppShellContent({ fallback }: NativeAppShellProps) {
-  const { user } = useAuth();
   const [selectedTab, setSelectedTab] = useState<NativeTabId>('yourBeer');
   const [contentMode, setContentMode] = useState<NativeContentMode>('yourBeer');
   const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
-  const [webFallbackPath, setWebFallbackPath] = useState<string | null>(null);
 
   const selectedRoute = NATIVE_TABS.find((tab) => tab.id === selectedTab) ?? NATIVE_TABS[0];
-  const activeWebPath = webFallbackPath ?? selectedRoute.webPath;
+  const activeWebPath = selectedRoute.webPath;
 
   const returnToYourBeer = () => {
     setSettingsMenuVisible(false);
     setSelectedTab('yourBeer');
     setContentMode('yourBeer');
-    setWebFallbackPath(null);
   };
 
   useEffect(() => {
@@ -89,70 +83,57 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
 
     setSelectedTab(tab.id);
     setContentMode(tab.id);
-    setWebFallbackPath(null);
   };
 
-  const openNativeSettings = () => {
+  const openSettingsInfo = () => {
     setSettingsMenuVisible(false);
     setSelectedTab('settings');
     setContentMode('settingsPage');
-    setWebFallbackPath(null);
   };
 
   const openAuth = () => {
     setSettingsMenuVisible(false);
     setSelectedTab('settings');
     setContentMode('auth');
-    setWebFallbackPath(null);
   };
 
   const openAboutHhs = () => {
     setSettingsMenuVisible(false);
     setSelectedTab('settings');
     setContentMode('aboutHhs');
-    setWebFallbackPath(null);
   };
 
   const openFeedback = () => {
     setSettingsMenuVisible(false);
     setSelectedTab('settings');
     setContentMode('feedback');
-    setWebFallbackPath(null);
-  };
-
-  const openBeerWebFallback = (path?: string) => {
-    setWebFallbackPath(path ?? selectedRoute.webPath ?? null);
   };
 
   return (
     <>
       {/*
-        The native tab foundation is intentionally opt-in behind
-        EXPO_PUBLIC_HHS_NATIVE_BEER_SCREEN=1. Native Calendar, Your Beer, and
-        Settings are first-class native routes here; Wall and Rankings remain WebView
-        fallbacks until their native data/side-effect parity is implemented.
+        Small safe recovery: keep the native bottom navigation and Settings
+        launcher, but route real product surfaces back to the web app
+        source-of-truth in app-mode WebViews. Do not expose partial native
+        Calendar, Your Beer, auth, about, or feedback clones by default.
       */}
       <View style={styles.shell}>
-        <View style={styles.content} key={`${selectedRoute.id}:${activeWebPath ?? 'native'}`}>
-          {contentMode === 'calendar' && !webFallbackPath ? (
-            <NativeBeerScreen mode="calendar" onOpenWebFallback={openBeerWebFallback} />
-          ) : contentMode === 'yourBeer' && !webFallbackPath ? (
-            <NativeBeerScreen mode="yourBeer" onOpenWebFallback={openBeerWebFallback} />
-          ) : contentMode === 'auth' && !webFallbackPath ? (
-            <NativeAccountSettingsScreen mode="auth" onBack={returnToYourBeer} onOpenAuth={openAuth} />
-          ) : contentMode === 'settingsPage' && !webFallbackPath ? (
-            <NativeAccountSettingsScreen mode="settings" onBack={returnToYourBeer} onOpenAuth={openAuth} />
-          ) : contentMode === 'aboutHhs' && !webFallbackPath ? (
-            <NativeAccountSettingsScreen mode="about" onBack={returnToYourBeer} onOpenAuth={openAuth} />
-          ) : contentMode === 'feedback' && !webFallbackPath ? (
-            <NativeAccountSettingsScreen mode="feedback" onBack={returnToYourBeer} onOpenAuth={openAuth} />
+        <View style={styles.content} key={`${contentMode}:${activeWebPath ?? 'native'}`}>
+          {contentMode === 'auth' ? (
+            fallback('/auth?hhs_app=1')
+          ) : contentMode === 'aboutHhs' ? (
+            fallback('/?hhs_app=1')
+          ) : contentMode === 'feedback' ? (
+            fallback('/feedback?hhs_app=1')
+          ) : contentMode === 'settingsPage' ? (
+            <NativeSettingsInfoScreen onBack={returnToYourBeer} onOpenAuth={openAuth} />
           ) : (
             fallback(activeWebPath)
           )}
         </View>
         <View style={styles.tabBar}>
           {NATIVE_TABS.map((tab) => {
-            const active = tab.id === selectedTab && !webFallbackPath;
+            const active = tab.id === selectedTab;
             return (
               <TouchableOpacity
                 key={tab.id}
@@ -194,10 +175,10 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
                   <Text style={styles.menuBody}>Choose a Society action.</Text>
 
                   <TouchableOpacity style={styles.menuItem} onPress={openAuth} activeOpacity={0.78}>
-                    <Text style={styles.menuItemText}>{user?.email ? 'Sign out' : 'Sign in'}</Text>
+                    <Text style={styles.menuItemText}>Sign in / out</Text>
                     <Text style={styles.menuChevron}>›</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.menuItem} onPress={openNativeSettings} activeOpacity={0.78}>
+                  <TouchableOpacity style={styles.menuItem} onPress={openSettingsInfo} activeOpacity={0.78}>
                     <Text style={styles.menuItemText}>Settings</Text>
                     <Text style={styles.menuChevron}>›</Text>
                   </TouchableOpacity>
@@ -211,7 +192,7 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
                   </TouchableOpacity>
 
                   <Text style={styles.menuFooter}>
-                    {user?.email ? user.email : HHS_WEB_ORIGIN.replace('https://', '')}
+                    {HHS_WEB_ORIGIN.replace('https://', '')}
                   </Text>
                 </View>
               </TouchableWithoutFeedback>
@@ -220,6 +201,27 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
         </Modal>
       </View>
     </>
+  );
+}
+
+function NativeSettingsInfoScreen({ onBack, onOpenAuth }: { onBack: () => void; onOpenAuth: () => void }) {
+  return (
+    <View style={styles.settingsInfoScreen}>
+      <View style={styles.settingsInfoCard}>
+        <Text style={styles.settingsInfoKicker}>Hallowed Hop Society</Text>
+        <Text style={styles.settingsInfoTitle}>The Settings</Text>
+        <Text style={styles.settingsInfoBody}>
+          Notification preferences require a signed-in Society account. This recovery build keeps the
+          production web app as the source of truth for account, membership, payment, and feedback flows.
+        </Text>
+        <TouchableOpacity style={styles.settingsInfoPrimaryButton} onPress={onOpenAuth} activeOpacity={0.82}>
+          <Text style={styles.settingsInfoPrimaryText}>Sign in on the web</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.settingsInfoSecondaryButton} onPress={onBack} activeOpacity={0.78}>
+          <Text style={styles.settingsInfoSecondaryText}>Back to Your Beer</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 }
 
@@ -388,6 +390,73 @@ const styles = StyleSheet.create({
     marginTop: 16,
     opacity: 0.72,
     textAlign: 'center',
+  },
+  settingsInfoScreen: {
+    alignItems: 'center',
+    backgroundColor: HHS_COLORS.background,
+    flex: 1,
+    justifyContent: 'center',
+    padding: 20,
+  },
+  settingsInfoCard: {
+    backgroundColor: HHS_COLORS.card,
+    borderColor: HHS_COLORS.border,
+    borderRadius: HHS_STYLES.cardRadius,
+    borderWidth: 1,
+    padding: 22,
+    width: '100%',
+  },
+  settingsInfoKicker: {
+    ...HHS_TYPOGRAPHY.kicker,
+    color: HHS_COLORS.gold,
+    fontSize: 11,
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  settingsInfoTitle: {
+    ...HHS_TYPOGRAPHY.display,
+    color: HHS_COLORS.text,
+    fontSize: 28,
+    fontWeight: '700',
+    marginBottom: 14,
+    textAlign: 'center',
+  },
+  settingsInfoBody: {
+    ...HHS_TYPOGRAPHY.body,
+    color: HHS_COLORS.muted,
+    fontSize: 16,
+    lineHeight: 25,
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  settingsInfoPrimaryButton: {
+    alignItems: 'center',
+    backgroundColor: HHS_COLORS.gold,
+    borderRadius: HHS_STYLES.pillRadius,
+    marginTop: 4,
+    paddingHorizontal: 18,
+    paddingVertical: 13,
+  },
+  settingsInfoPrimaryText: {
+    ...HHS_TYPOGRAPHY.body,
+    color: HHS_COLORS.background,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  settingsInfoSecondaryButton: {
+    alignItems: 'center',
+    borderColor: HHS_COLORS.borderStrong,
+    borderRadius: HHS_STYLES.pillRadius,
+    borderWidth: 1,
+    marginTop: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 13,
+  },
+  settingsInfoSecondaryText: {
+    ...HHS_TYPOGRAPHY.body,
+    color: HHS_COLORS.text,
+    fontSize: 15,
+    fontWeight: '600',
   },
   aboutScreen: {
     backgroundColor: HHS_COLORS.background,

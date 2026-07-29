@@ -915,17 +915,17 @@ function HhsWebViewFallbackApp({ initialPath }: { initialPath?: string }) {
 
   const handleSignIn = useCallback(() => {
     setMenuOpen(false);
-    webViewRef.current?.injectJavaScript(`window.location.replace('${HHS_ORIGIN}/auth'); true;`);
+    webViewRef.current?.injectJavaScript(`window.location.replace('${HHS_ORIGIN}/auth?hhs_app=1'); true;`);
   }, []);
 
   const handleOpenFeedback = useCallback(() => {
     setMenuOpen(false);
-    webViewRef.current?.injectJavaScript(`window.location.replace('${HHS_ORIGIN}/feedback'); true;`);
+    webViewRef.current?.injectJavaScript(`window.location.replace('${HHS_ORIGIN}/feedback?hhs_app=1'); true;`);
   }, []);
 
   const handleOpenAboutHhs = useCallback(() => {
     setMenuOpen(false);
-    webViewRef.current?.injectJavaScript(`window.location.replace('${HOME_URL}'); true;`);
+    webViewRef.current?.injectJavaScript(`window.location.replace('${HHS_ORIGIN}/?hhs_app=1'); true;`);
   }, []);
 
   const handleOpenSettings = useCallback(() => {
@@ -1054,7 +1054,7 @@ function HhsWebViewFallbackApp({ initialPath }: { initialPath?: string }) {
                   </TouchableOpacity>
 
                   {/* Version footer — helps confirm the installed build */}
-                  <Text style={styles.menuVersionFooter}>HHS v1.0.28 (29)</Text>
+                  <Text style={styles.menuVersionFooter}>HHS v1.0.29 (30)</Text>
                 </View>
               </TouchableWithoutFeedback>
             </View>
