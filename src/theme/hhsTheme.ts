@@ -1,11 +1,9 @@
-import { Platform } from 'react-native';
-
 export const HHS_COLORS = {
   background: '#191726',
   card: '#201d30',
   cardAlt: '#28233a',
   text: '#d9d8d2',
-  muted: '#a69d8d',
+  muted: '#7a7468',
   gold: '#d97c2b',
   goldLight: '#e8953a',
   goldDark: '#9f561c',
@@ -15,14 +13,9 @@ export const HHS_COLORS = {
   goldDim: 'rgba(217, 124, 43, 0.12)',
 } as const;
 
-// Web uses Google Font "Modern Antiqua" with Georgia/serif fallbacks.
-// The native repo does not currently bundle ModernAntiqua-Regular.ttf, so use
-// the closest platform serif stack without adding a new font-loading path.
-export const HHS_FONT_FAMILY = Platform.select({
-  ios: 'Georgia',
-  android: 'serif',
-  default: 'serif',
-});
+// Matches the authoritative web app's Google Font family.
+// Loaded by NativeAppShell through @expo-google-fonts/modern-antiqua.
+export const HHS_FONT_FAMILY = 'ModernAntiqua_400Regular';
 
 export const HHS_TYPOGRAPHY = {
   body: {

@@ -25,7 +25,7 @@ const BEER_CALENDAR_DAYS = 31;
 
 type NativeBeerScreenProps = {
   mode?: 'calendar' | 'yourBeer';
-  onOpenWebFallback: (path?: string) => void;
+  onOpenWebFallback?: (path?: string) => void;
 };
 
 function formatBeerMeta(beer: Beer) {
@@ -48,6 +48,14 @@ function getCountdownText(now: Date) {
   return `${days} days · ${hours} hrs`;
 }
 
+function getCountdownParts(now: Date) {
+  const diff = Math.max(0, getOctoberStart().getTime() - now.getTime());
+  return {
+    days: Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24))),
+    hours: Math.max(0, Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))),
+  };
+}
+
 function getCalendarState(now: Date) {
   const isBeforeStart = now.getTime() < getOctoberStart().getTime();
   const isActiveOctober =
@@ -65,7 +73,7 @@ function getCalendarState(now: Date) {
   };
 }
 
-export function NativeBeerScreen({ mode = 'calendar', onOpenWebFallback }: NativeBeerScreenProps) {
+export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
   const { user } = useAuth();
   const [beers, setBeers] = useState<Beer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -320,13 +328,31 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWebFallback }: Nativ
 
   const renderCalendarIntro = () => {
     if (isBeforeStart) {
+      const countdown = getCountdownParts(now);
       return (
-        <View style={styles.heroCard}>
-          <Text style={styles.kicker}>The Calendar Is Being Set</Text>
-          <Text style={styles.countdown}>{getCountdownText(now)}</Text>
+        <View style={styles.preOctoberSection}>
+          <View style={styles.ritualDivider}>
+            <View style={styles.ritualLine} />
+            <Text style={styles.kicker}>The Calendar Is Being Set</Text>
+            <View style={styles.ritualLine} />
+          </View>
+          <Text style={styles.countdownLabel}>October 1st begins in</Text>
+          <View style={styles.countdownRow}>
+            <Text style={styles.countdownNumber}>{countdown.days}</Text>
+            <Text style={styles.countdownUnit}>days</Text>
+            <Text style={styles.countdownDot}>·</Text>
+            <Text style={styles.countdownNumber}>{countdown.hours}</Text>
+            <Text style={styles.countdownUnit}>hrs</Text>
+          </View>
+          <View style={styles.manifestoCard}>
+            <Text style={styles.manifestoText}>
+              Every October, the Society convenes. Thirty-one days. Thirty-one beers. The deliberation is
+              underway — each selection debated, contested, and earned. The calendar isn’t set yet. But it
+              will be.
+            </Text>
+          </View>
           <Text style={styles.bodyText}>
-            Every October, the Society convenes. Thirty-one days. Thirty-one beers. The 2026 calendar
-            remains veiled until the ritual begins.
+            The 31 slots below are reserved. The beers have yet to be named.
           </Text>
         </View>
       );
@@ -448,6 +474,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWebFallback }: Nativ
           const isToday = day === todayDay;
           const isPast = revealedThroughDay ? day < revealedThroughDay : false;
           const shouldReveal = Boolean(beer && revealedThroughDay && day <= revealedThroughDay);
+          const canOpenDetail = Boolean(beer && revealedThroughDay && day < revealedThroughDay);
 
           return (
             <TouchableOpacity
@@ -456,13 +483,13 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWebFallback }: Nativ
                 styles.listItem,
                 isToday && styles.todayListItem,
                 isPast && !isToday && styles.pastListItem,
-                shouldReveal && styles.selectableListItem,
+                canOpenDetail && styles.selectableListItem,
               ]}
               onPress={() => {
-                if (shouldReveal && beer) openBeerDetail(beer);
+                if (canOpenDetail && beer) openBeerDetail(beer);
               }}
-              activeOpacity={shouldReveal ? 0.82 : 1}
-              disabled={!shouldReveal || !beer}
+              activeOpacity={canOpenDetail ? 0.82 : 1}
+              disabled={!canOpenDetail}
             >
               <Text style={[styles.dayNumber, isToday && styles.todayText]}>{day}</Text>
               <View style={styles.listText}>
@@ -568,15 +595,6 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWebFallback }: Nativ
               <Text style={styles.appKicker}>Hallowed Hop Society</Text>
               <Text style={styles.headerTitle}>{mode === 'calendar' ? 'The Calendar' : 'Your Beer'}</Text>
             </View>
-            {mode === 'calendar' ? (
-              <TouchableOpacity
-                style={styles.webFallbackButton}
-                onPress={() => onOpenWebFallback('/beers')}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.webFallbackText}>Web</Text>
-              </TouchableOpacity>
-            ) : null}
           </View>
 
           {loading ? (
@@ -664,6 +682,79 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 1.2,
     textTransform: 'uppercase',
+  },
+  preOctoberSection: {
+    alignItems: 'center',
+    marginBottom: 30,
+    paddingBottom: 8,
+    paddingTop: 30,
+  },
+  ritualDivider: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 28,
+    width: '100%',
+  },
+  ritualLine: {
+    backgroundColor: COLORS.borderStrong,
+    flex: 1,
+    height: 1,
+    opacity: 0.78,
+  },
+  countdownLabel: {
+    ...HHS_TYPOGRAPHY.kicker,
+    color: COLORS.muted,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 3,
+    marginBottom: 10,
+    textAlign: 'center',
+    textTransform: 'uppercase',
+  },
+  countdownRow: {
+    alignItems: 'flex-end',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: 28,
+  },
+  countdownNumber: {
+    ...HHS_TYPOGRAPHY.display,
+    color: COLORS.gold,
+    fontSize: 48,
+    lineHeight: 54,
+  },
+  countdownUnit: {
+    ...HHS_TYPOGRAPHY.body,
+    color: COLORS.muted,
+    fontSize: 18,
+    lineHeight: 35,
+    marginLeft: 7,
+  },
+  countdownDot: {
+    ...HHS_TYPOGRAPHY.display,
+    color: COLORS.borderStrong,
+    fontSize: 30,
+    lineHeight: 44,
+    marginHorizontal: 16,
+  },
+  manifestoCard: {
+    backgroundColor: COLORS.card,
+    borderColor: COLORS.border,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 22,
+    paddingHorizontal: 22,
+    paddingVertical: 20,
+    width: '100%',
+  },
+  manifestoText: {
+    ...HHS_TYPOGRAPHY.body,
+    color: COLORS.muted,
+    fontSize: 16,
+    fontStyle: 'italic',
+    lineHeight: 29,
+    textAlign: 'center',
   },
   loadingCard: {
     alignItems: 'center',

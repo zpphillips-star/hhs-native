@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { BackHandler, Image, Modal, Platform, StyleSheet, Text, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
+import { ModernAntiqua_400Regular, useFonts } from '@expo-google-fonts/modern-antiqua';
 
 import { HHS_WEB_ORIGIN, USE_NATIVE_BEER_SCREEN } from '../config/env';
 import { AuthProvider } from '../features/auth/AuthProvider';
+import { NativeBeerScreen } from '../features/beers/NativeBeerScreen';
 import { HHS_COLORS, HHS_STYLES, HHS_TYPOGRAPHY } from '../theme/hhsTheme';
 
 type NativeTabId = 'calendar' | 'wall' | 'yourBeer' | 'rankings' | 'settings';
@@ -42,6 +44,7 @@ export function NativeAppShell({ fallback }: NativeAppShellProps) {
 }
 
 function NativeAppShellContent({ fallback }: NativeAppShellProps) {
+  const [fontsLoaded] = useFonts({ ModernAntiqua_400Regular });
   const [selectedTab, setSelectedTab] = useState<NativeTabId>('yourBeer');
   const [contentMode, setContentMode] = useState<NativeContentMode>('yourBeer');
   const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
@@ -111,15 +114,13 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
 
   return (
     <>
-      {/*
-        Small safe recovery: keep the native bottom navigation and Settings
-        launcher, but route real product surfaces back to the web app
-        source-of-truth in app-mode WebViews. Do not expose partial native
-        Calendar, Your Beer, auth, about, or feedback clones by default.
-      */}
       <View style={styles.shell}>
         <View style={styles.content} key={`${contentMode}:${activeWebPath ?? 'native'}`}>
-          {contentMode === 'auth' ? (
+          {!fontsLoaded ? (
+            <View style={styles.fontLoadingScreen} />
+          ) : contentMode === 'calendar' ? (
+            <NativeBeerScreen mode="calendar" />
+          ) : contentMode === 'auth' ? (
             fallback('/auth?hhs_app=1')
           ) : contentMode === 'aboutHhs' ? (
             fallback('/?hhs_app=1')
@@ -227,6 +228,10 @@ function NativeSettingsInfoScreen({ onBack, onOpenAuth }: { onBack: () => void; 
 
 const styles = StyleSheet.create({
   shell: {
+    backgroundColor: HHS_COLORS.background,
+    flex: 1,
+  },
+  fontLoadingScreen: {
     backgroundColor: HHS_COLORS.background,
     flex: 1,
   },
