@@ -18,6 +18,13 @@ export const SUPABASE_ANON_KEY =
 
 export const isSupabaseEnvConfigured = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 
+// Internal-only test hook for validating the October beer reveal flow.
+// Remove `hhsTestDate` from app.json, or leave EXPO_PUBLIC_HHS_TEST_DATE unset,
+// before production release builds that should use the device clock.
+export const HHS_TEST_DATE =
+  process.env.EXPO_PUBLIC_HHS_TEST_DATE ??
+  (typeof expoExtra.hhsTestDate === 'string' ? expoExtra.hhsTestDate : undefined);
+
 // Controlled native migration flag. Keep the WebView as the default app surface
 // until a native route/shell is intentionally enabled for validation.
 export const USE_NATIVE_BEER_SCREEN =

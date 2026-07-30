@@ -74,21 +74,24 @@ export async function fetchBeerRatingSummary(beerId: string): Promise<BeerRating
   };
 }
 
-export async function upsertUserBeerRating(userId: string, beerId: string, stars: number): Promise<BeerRating> {
+export async function upsertUserBeerRating(
+  userId: string,
+  beerId: string,
+  stars: number,
+  notes?: string | null,
+): Promise<BeerRating> {
   if (!supabase) {
     throw new Error('Supabase public env is not configured for the native app.');
   }
 
+  const payload: Record<string, unknown> = { user_id: userId, beer_id: beerId, stars };
+  if (notes !== undefined) {
+    payload.notes = notes;
+  }
+
   const { data, error } = await supabase
     .from('ratings')
-    .upsert(
-      {
-        user_id: userId,
-        beer_id: beerId,
-        stars,
-      },
-      { onConflict: 'user_id,beer_id' },
-    )
+    .upsert(payload, { onConflict: 'user_id,beer_id' })
     .select('id,user_id,beer_id,stars,notes,created_at')
     .maybeSingle();
 

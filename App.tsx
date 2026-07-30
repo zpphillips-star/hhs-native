@@ -21,6 +21,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { WebView, WebViewMessageEvent, WebViewNavigation } from 'react-native-webview';
 import { useAuth } from './src/features/auth/AuthProvider';
 import { NativeAppShell } from './src/navigation/NativeAppShell';
+import { supabase } from './src/lib/supabase';
 import { HHS_COLORS, HHS_STYLES, HHS_TYPOGRAPHY } from './src/theme/hhsTheme';
 
 const HHS_ORIGIN = 'https://hallowedhopsociety.com';
@@ -76,6 +77,10 @@ type NativeBridgeMessage = {
     id?: unknown;
     email?: unknown;
     name?: unknown;
+  };
+  session?: {
+    access_token?: unknown;
+    refresh_token?: unknown;
   };
 };
 
@@ -220,7 +225,11 @@ const hhsNativeBridgeJavaScript = `
         var parsed = JSON.parse(localStorage.getItem(key) || '{}');
         var session = parsed.currentSession || parsed.session || parsed;
         var user = normalizeUser(session.user || parsed.user);
-        if (user) return user;
+        if (user) {
+          user.__access_token = session.access_token || null;
+          user.__refresh_token = session.refresh_token || null;
+          return user;
+        }
       }
       return null;
     }
@@ -240,7 +249,15 @@ const hhsNativeBridgeJavaScript = `
       try {
         var user = userFromSupabaseStorage() || userFromDom();
         if (!user || !window.ReactNativeWebView) return;
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'HHS_AUTH_USER', user: user }));
+        var accessToken = user.__access_token || null;
+        var refreshToken = user.__refresh_token || null;
+        delete user.__access_token;
+        delete user.__refresh_token;
+        var payload = { type: 'HHS_AUTH_USER', user: user };
+        if (accessToken && refreshToken) {
+          payload.session = { access_token: accessToken, refresh_token: refreshToken };
+        }
+        window.ReactNativeWebView.postMessage(JSON.stringify(payload));
       } catch (error) {
         console.warn('[HHS native] logged-in user detection failed', error);
       }
@@ -740,6 +757,29 @@ function HhsWebViewFallbackApp({ initialPath }: { initialPath?: string }) {
 
         const user = sanitizeBridgeUser(message);
         if (!user) return;
+
+        // Sync the web session into the native Supabase client so that
+        // useAuth().user is populated for ratings and other native-only features.
+        const rawSession = message.session;
+        if (
+          rawSession &&
+          typeof rawSession.access_token === 'string' &&
+          typeof rawSession.refresh_token === 'string' &&
+          rawSession.access_token &&
+          rawSession.refresh_token
+        ) {
+          supabase?.auth
+            .setSession({
+              access_token: rawSession.access_token,
+              refresh_token: rawSession.refresh_token,
+            })
+            .catch((err: unknown) => {
+              console.warn(
+                '[HHS native] setSession from web bridge failed:',
+                err instanceof Error ? err.message : err,
+              );
+            });
+        }
 
         setLoggedInUser((currentUser) => {
           if (currentUser?.email === user.email && currentUser?.id === user.id) return currentUser;
