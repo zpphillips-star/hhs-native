@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { BackHandler, Image, Modal, Platform, StyleSheet, Text, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
 import { ModernAntiqua_400Regular, useFonts } from '@expo-google-fonts/modern-antiqua';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { HHS_WEB_ORIGIN, USE_NATIVE_BEER_SCREEN } from '../config/env';
 import { AuthProvider } from '../features/auth/AuthProvider';
@@ -37,9 +38,11 @@ export function NativeAppShell({ fallback }: NativeAppShellProps) {
   }
 
   return (
-    <AuthProvider>
-      <NativeAppShellContent fallback={fallback} />
-    </AuthProvider>
+    <SafeAreaProvider>
+      <AuthProvider>
+        <NativeAppShellContent fallback={fallback} />
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }
 
@@ -48,6 +51,7 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
   const [selectedTab, setSelectedTab] = useState<NativeTabId>('yourBeer');
   const [contentMode, setContentMode] = useState<NativeContentMode>('yourBeer');
   const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
+  const insets = useSafeAreaInsets();
 
   const selectedRoute = NATIVE_TABS.find((tab) => tab.id === selectedTab) ?? NATIVE_TABS[0];
   const activeWebPath = selectedRoute.webPath;
@@ -132,7 +136,7 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
             fallback(activeWebPath)
           )}
         </View>
-        <View style={styles.tabBar}>
+        <View style={[styles.tabBar, { paddingBottom: Math.max(9, insets.bottom + 4) }]}>
           {NATIVE_TABS.map((tab) => {
             const active = tab.id === selectedTab;
             return (
@@ -166,7 +170,7 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
           <TouchableWithoutFeedback onPress={() => setSettingsMenuVisible(false)}>
             <View style={styles.menuBackdrop}>
               <TouchableWithoutFeedback>
-                <View style={styles.menuSheet}>
+                <View style={[styles.menuSheet, { paddingBottom: Math.max(34, insets.bottom + 16) }]}>
                   <View style={styles.menuHandle} />
                   <View style={styles.menuLogoCircle}>
                     <Image source={HHS_LOGO} style={styles.menuLogoImage} resizeMode="contain" />

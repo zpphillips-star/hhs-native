@@ -3,7 +3,9 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -289,6 +291,12 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
     try {
       const rating = await upsertUserBeerRating(user.id, selectedBeer.id, stars);
       setSelectedRating(rating);
+      // Refresh society aggregate so it reflects the new rating immediately.
+      try {
+        setSelectedRatingSummary(await fetchBeerRatingSummary(selectedBeer.id));
+      } catch {
+        // Non-fatal: summary stays as-is if the refresh fails.
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not save your rating.';
       setRatingError(message);
@@ -671,7 +679,7 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
     const meta = formatBeerMeta(selectedBeer);
 
     return (
-      <Modal visible transparent animationType="fade" onRequestClose={closeBeerDetail}>
+      <Modal visible transparent animationType="fade" onRequestClose={closeBeerDetail} statusBarTranslucent>
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
@@ -683,7 +691,11 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
               </TouchableOpacity>
             </View>
 
-            <ScrollView contentContainerStyle={styles.modalScrollContent}>
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+              style={styles.modalKAV}
+            >
+              <ScrollView contentContainerStyle={styles.modalScrollContent}>
               {selectedBeer.image_url ? (
                 <Image source={{ uri: selectedBeer.image_url }} style={styles.detailImage} resizeMode="cover" />
               ) : null}
@@ -750,6 +762,7 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
                 savingRating: ratingSaving,
               })}
             </ScrollView>
+            </KeyboardAvoidingView>
           </View>
         </View>
       </Modal>
@@ -758,7 +771,7 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
 
   return (
     <SafeAreaProvider>
-      <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+      <SafeAreaView style={styles.container} edges={['top']}>
         <StatusBar style="light" backgroundColor={COLORS.background} />
         <ScrollView
           contentContainerStyle={[styles.scrollContent, mode === 'calendar' && styles.calendarScrollContent]}
@@ -1219,6 +1232,9 @@ const styles = StyleSheet.create({
     maxHeight: '86%',
     overflow: 'hidden',
     width: '100%',
+  },
+  modalKAV: {
+    flex: 1,
   },
   modalHeader: {
     alignItems: 'center',
