@@ -141,6 +141,8 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
     try {
       const rating = await fetchUserBeerRating(userId, beer.id);
       setSelectedRating(rating);
+      // Pre-fill notes text so existing saved notes are visible immediately in the detail modal.
+      setSelectedNotesText(rating?.notes ?? '');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not load your rating.';
       setRatingError(message);
