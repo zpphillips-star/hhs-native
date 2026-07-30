@@ -621,15 +621,16 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
           const shouldReveal = Boolean(beer && revealedThroughDay && day <= revealedThroughDay);
           // Today's beer is also tappable — opens the same detail/rating modal as past days
           const canOpenDetail = Boolean(beer && revealedThroughDay && day <= revealedThroughDay);
+          const isLast = day === 31;
 
           return (
             <TouchableOpacity
               key={day}
               style={[
                 styles.listItem,
+                !isLast && styles.listItemSeparator,
                 isToday && styles.todayListItem,
                 isPast && !isToday && styles.pastListItem,
-                canOpenDetail && styles.selectableListItem,
               ]}
               onPress={() => {
                 if (canOpenDetail && beer) openBeerDetail(beer);
@@ -848,39 +849,6 @@ const styles = StyleSheet.create({
     fontSize: 34,
     fontWeight: '700',
   },
-  testDateBanner: {
-    backgroundColor: 'rgba(212, 161, 74, 0.12)',
-    borderColor: COLORS.borderStrong,
-    borderRadius: 14,
-    borderWidth: 1,
-    marginBottom: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  testDateText: {
-    ...HHS_TYPOGRAPHY.kicker,
-    color: COLORS.gold,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1.2,
-    textAlign: 'center',
-    textTransform: 'uppercase',
-  },
-  webFallbackButton: {
-    borderColor: COLORS.borderStrong,
-    borderRadius: HHS_STYLES.pillRadius,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  webFallbackText: {
-    ...HHS_TYPOGRAPHY.button,
-    color: COLORS.gold,
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-  },
   preOctoberSection: {
     alignItems: 'center',
     marginBottom: 30,
@@ -1095,23 +1063,6 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     marginBottom: 14,
   },
-  detailButton: {
-    alignSelf: 'flex-start',
-    borderColor: COLORS.borderStrong,
-    borderRadius: 999,
-    borderWidth: 1,
-    marginBottom: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-  },
-  detailButtonText: {
-    ...HHS_TYPOGRAPHY.button,
-    color: COLORS.gold,
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1.4,
-    textTransform: 'uppercase',
-  },
   actionGrid: {
     gap: 12,
     marginTop: 14,
@@ -1185,27 +1136,28 @@ const styles = StyleSheet.create({
     width: 96,
   },
   list: {
-    gap: 10,
-  },
-  listItem: {
-    alignItems: 'center',
     backgroundColor: COLORS.card,
     borderColor: COLORS.border,
     borderRadius: 14,
     borderWidth: 1,
+    overflow: 'hidden',
+  },
+  listItem: {
+    alignItems: 'center',
     flexDirection: 'row',
     gap: 14,
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
+  listItemSeparator: {
+    borderBottomColor: COLORS.border,
+    borderBottomWidth: 1,
+  },
   todayListItem: {
-    borderColor: COLORS.gold,
+    backgroundColor: COLORS.goldDim,
   },
   pastListItem: {
     opacity: 0.78,
-  },
-  selectableListItem: {
-    borderColor: COLORS.borderStrong,
   },
   dayNumber: {
     ...HHS_TYPOGRAPHY.display,
