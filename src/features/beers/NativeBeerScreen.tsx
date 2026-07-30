@@ -14,6 +14,7 @@ import {
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '../auth/AuthProvider';
+import { HHS_TEST_DATE } from '../../config/env';
 import { HHS_COLORS, HHS_STYLES, HHS_TYPOGRAPHY } from '../../theme/hhsTheme';
 import { fetchBeerRatingSummary, fetchBeers, fetchUserBeerRating, upsertUserBeerRating } from './beerService';
 import type { Beer, BeerRating, BeerRatingSummary } from './types';
@@ -39,6 +40,21 @@ function getOctoberStart() {
 
 function getOctoberEnd() {
   return new Date(BEER_CALENDAR_YEAR, BEER_CALENDAR_MONTH_INDEX, BEER_CALENDAR_DAYS, 23, 59, 59, 999);
+}
+
+function getEffectiveNow() {
+  if (!HHS_TEST_DATE) return new Date();
+
+  // HHS_TEST_DATE is the simulated-October anchor date baked into the build.
+  // Instead of freezing at that date, we advance it by one day for every real
+  // calendar day elapsed since the build was first deployed (Jul 29 2026).
+  // Jul 29 real → Oct 29 simulated; Jul 30 real → Oct 30 simulated, etc.
+  const testAnchor = new Date(HHS_TEST_DATE);
+  if (Number.isNaN(testAnchor.getTime())) return new Date();
+
+  const REAL_DEPLOY_REF = new Date('2026-07-29T00:00:00');
+  const daysSinceDeploy = Math.floor((Date.now() - REAL_DEPLOY_REF.getTime()) / 86_400_000);
+  return new Date(testAnchor.getTime() + Math.max(0, daysSinceDeploy) * 86_400_000);
 }
 
 function getCountdownText(now: Date) {
@@ -91,7 +107,8 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
   const [todayRatingSummary, setTodayRatingSummary] = useState<BeerRatingSummary>({ average: null, count: 0 });
   const [todayRatingSummaryLoading, setTodayRatingSummaryLoading] = useState(false);
 
-  const now = useMemo(() => new Date(), []);
+  const now = useMemo(() => getEffectiveNow(), []);
+  const isTestDateOverride = Boolean(HHS_TEST_DATE);
   const calendarState = useMemo(() => getCalendarState(now), [now]);
   const { isActiveOctober, isBeforeStart, isComplete, revealedThroughDay, todayDay } = calendarState;
 
@@ -590,12 +607,15 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
             />
           }
         >
-          <View style={styles.header}>
-            <View>
-              <Text style={styles.appKicker}>Hallowed Hop Society</Text>
-              <Text style={styles.headerTitle}>{mode === 'calendar' ? 'The Calendar' : 'Your Beer'}</Text>
+          {/* Only show the screen header in yourBeer mode; Calendar's intro section provides its own context */}
+          {mode === 'yourBeer' ? (
+            <View style={styles.header}>
+              <View>
+                <Text style={styles.appKicker}>Hallowed Hop Society</Text>
+                <Text style={styles.headerTitle}>Your Beer</Text>
+              </View>
             </View>
-          </View>
+          ) : null}
 
           {loading ? (
             <View style={styles.loadingCard}>
@@ -657,7 +677,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.kicker,
     color: COLORS.gold,
     fontSize: 11,
-    fontWeight: '700',
     letterSpacing: 2.4,
     marginBottom: 4,
     textTransform: 'uppercase',
@@ -667,6 +686,24 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontSize: 34,
     fontWeight: '700',
+  },
+  testDateBanner: {
+    backgroundColor: 'rgba(212, 161, 74, 0.12)',
+    borderColor: COLORS.borderStrong,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  testDateText: {
+    ...HHS_TYPOGRAPHY.kicker,
+    color: COLORS.gold,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    textAlign: 'center',
+    textTransform: 'uppercase',
   },
   webFallbackButton: {
     borderColor: COLORS.borderStrong,
@@ -832,7 +869,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.kicker,
     color: COLORS.gold,
     fontSize: 11,
-    fontWeight: '700',
     letterSpacing: 3,
     marginBottom: 12,
     textAlign: 'center',
@@ -842,7 +878,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.gold,
     fontSize: 32,
-    fontWeight: '700',
     marginBottom: 18,
     textAlign: 'center',
   },
@@ -952,7 +987,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.kicker,
     color: COLORS.gold,
     fontSize: 11,
-    fontWeight: '700',
     letterSpacing: 2,
     marginBottom: 8,
     textTransform: 'uppercase',
@@ -978,7 +1012,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.gold,
     fontSize: 24,
-    fontWeight: '700',
     letterSpacing: 4,
     marginBottom: 10,
     textTransform: 'uppercase',
@@ -1017,7 +1050,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.muted,
     fontSize: 22,
-    fontWeight: '700',
     textAlign: 'center',
     width: 32,
   },
@@ -1032,7 +1064,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
     fontSize: 17,
-    fontWeight: '700',
     marginBottom: 3,
   },
   listBrewery: {
@@ -1056,7 +1087,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.button,
     color: COLORS.background,
     fontSize: 11,
-    fontWeight: '700',
     letterSpacing: 1,
   },
   modalBackdrop: {
@@ -1088,7 +1118,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.kicker,
     color: COLORS.muted,
     fontSize: 11,
-    fontWeight: '700',
     letterSpacing: 2,
     textTransform: 'uppercase',
   },
@@ -1100,7 +1129,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 18,
-    fontWeight: '700',
   },
   modalScrollContent: {
     padding: 18,
@@ -1116,7 +1144,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
     fontSize: 26,
-    fontWeight: '700',
     lineHeight: 31,
     marginBottom: 6,
   },

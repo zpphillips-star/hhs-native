@@ -2,7 +2,7 @@
   "expo": {
     "name": "Hallowed Hop Society",
     "slug": "hhs-native",
-    "version": "1.0.30",
+    "version": "1.0.32",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -26,7 +26,7 @@
         "backgroundColor": "#191726"
       },
       "package": "com.zplotindustries.hallowedhopsociety",
-      "versionCode": 31,
+      "versionCode": 33,
       "permissions": [
         "INTERNET",
         "POST_NOTIFICATIONS",
@@ -58,6 +58,7 @@
     },
     "extra": {
       "hhsNativeBeerScreen": "1",
+      "hhsTestDate": "2026-10-29T12:00:00",
       "eas": {
         "projectId": "7c415298-5d23-4f3d-b818-60a6ba5475a2"
       }
