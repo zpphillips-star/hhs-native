@@ -692,7 +692,7 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
             </View>
 
             <KeyboardAvoidingView
-              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
               style={styles.modalKAV}
             >
               <ScrollView contentContainerStyle={styles.modalScrollContent}>
