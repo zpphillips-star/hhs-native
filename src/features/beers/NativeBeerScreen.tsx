@@ -773,7 +773,14 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
               </View>
             ) : null}
           </View>
-        ) : null}
+        ) : (
+          <View style={styles.factCard}>
+            <Text style={styles.factLabel}>Beer write-up</Text>
+            <Text style={styles.factText}>
+              No beer_fact or brewery_fact field has been added for this beer yet.
+            </Text>
+          </View>
+        )}
         {renderSocietyRatingPanel()}
         {renderRatingPanel({
           errorMessage: todayRatingError,
@@ -1276,10 +1283,13 @@ const styles = StyleSheet.create({
   },
   descriptionText: {
     ...HHS_TYPOGRAPHY.body,
+    borderTopColor: COLORS.border,
+    borderTopWidth: 1,
     color: COLORS.text,
     fontSize: 15,
     lineHeight: 24,
-    marginBottom: 14,
+    marginBottom: 16,
+    paddingTop: 14,
   },
   actionGrid: {
     gap: 12,
