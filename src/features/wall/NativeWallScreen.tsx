@@ -233,7 +233,7 @@ export function NativeWallScreen({ initialBeerContext = null }: { initialBeerCon
     if (!initialBeerContext) return;
     setFilterBeerId(initialBeerContext.id);
     setFilterBeerLabel(`${initialBeerContext.name} · Day ${initialBeerContext.dayNumber}`);
-    setComposerText(`Day ${initialBeerContext.dayNumber} — ${initialBeerContext.name}: `);
+    // Do not pre-fill composer; beer context attaches behind the scenes for filtering only.
     setPosts([]);
     setHasMore(true);
   }, [initialBeerContext?.id, initialBeerContext?.name, initialBeerContext?.dayNumber]);

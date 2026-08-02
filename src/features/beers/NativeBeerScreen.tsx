@@ -23,11 +23,10 @@ import {
   createBeerWallPost,
   fetchBeerRatingSummary,
   fetchBeers,
-  fetchBeerWallActivity,
   fetchUserBeerRating,
   upsertUserBeerRating,
 } from './beerService';
-import type { Beer, BeerRating, BeerRatingSummary, BeerWallActivity } from './types';
+import type { Beer, BeerRating, BeerRatingSummary } from './types';
 
 const COLORS = HHS_COLORS;
 
@@ -56,19 +55,6 @@ type NativeBeerScreenProps = {
 function formatBeerMeta(beer: Beer) {
   const parts = [beer.style, beer.abv ? `${beer.abv}% ABV` : null].filter(Boolean);
   return parts.join(' · ');
-}
-
-function formatWallTimestamp(value: string) {
-  try {
-    return new Date(value).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    });
-  } catch {
-    return '';
-  }
 }
 
 function getCalendarStart() {
@@ -123,7 +109,7 @@ function getCalendarState(now: Date) {
   };
 }
 
-export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: NativeBeerScreenProps) {
+export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
   const { user } = useAuth();
   const [beers, setBeers] = useState<Beer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -140,25 +126,16 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
   const [todayRatingError, setTodayRatingError] = useState<string | null>(null);
   const [todayRatingSummary, setTodayRatingSummary] = useState<BeerRatingSummary>({ average: null, count: 0 });
   const [todayRatingSummaryLoading, setTodayRatingSummaryLoading] = useState(false);
-  // Notes / review state
-  const [selectedNotesText, setSelectedNotesText] = useState('');
-  const [selectedNotesSaving, setSelectedNotesSaving] = useState(false);
-  const [selectedNotesSaved, setSelectedNotesSaved] = useState(false);
-  const [todayNotesText, setTodayNotesText] = useState('');
-  const [todayNotesSaving, setTodayNotesSaving] = useState(false);
-  const [todayNotesSaved, setTodayNotesSaved] = useState(false);
-  // Society rating summary for the detail modal
+  // Notes / review state — kept for rating load compat; UI text boxes removed (v1.0.58+)
+  // Wall post state for Calendar detail modal
+
   const [selectedRatingSummary, setSelectedRatingSummary] = useState<BeerRatingSummary>({ average: null, count: 0 });
   const [selectedRatingSummaryLoading, setSelectedRatingSummaryLoading] = useState(false);
-  const [selectedWallActivity, setSelectedWallActivity] = useState<BeerWallActivity[]>([]);
-  const [selectedWallLoading, setSelectedWallLoading] = useState(false);
   const [selectedWallError, setSelectedWallError] = useState<string | null>(null);
   const [selectedWallPostText, setSelectedWallPostText] = useState('');
   const [selectedWallPosting, setSelectedWallPosting] = useState(false);
   const [selectedWallPosted, setSelectedWallPosted] = useState(false);
-  // Today wall post / activity state (Your Beer tab, Parts 5 & 6)
-  const [todayWallActivity, setTodayWallActivity] = useState<BeerWallActivity[]>([]);
-  const [todayWallLoading, setTodayWallLoading] = useState(false);
+  // Today wall post / activity state (Your Beer tab)
   const [todayWallError, setTodayWallError] = useState<string | null>(null);
   const [todayWallPostText, setTodayWallPostText] = useState('');
   const [todayWallPosting, setTodayWallPosting] = useState(false);
@@ -189,8 +166,6 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
     try {
       const rating = await fetchUserBeerRating(userId, beer.id);
       setSelectedRating(rating);
-      // Pre-fill notes text so existing saved notes are visible immediately in the detail modal.
-      setSelectedNotesText(rating?.notes ?? '');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not load your rating.';
       setRatingError(message);
@@ -230,8 +205,6 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
   useEffect(() => {
     setTodayRating(null);
     setTodayRatingError(null);
-    setTodayNotesText('');
-    setTodayNotesSaved(false);
 
     if (mode !== 'yourBeer' || !todayBeer || !user?.id) {
       setTodayRatingLoading(false);
@@ -244,7 +217,6 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
       .then((rating) => {
         if (!cancelled) {
           setTodayRating(rating);
-          setTodayNotesText(rating?.notes ?? '');
         }
       })
       .catch((err) => {
@@ -316,69 +288,16 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
   }, [selectedBeer]);
 
   useEffect(() => {
-    setSelectedWallActivity([]);
     setSelectedWallError(null);
     setSelectedWallPosted(false);
-    setSelectedWallPostText(selectedBeer ? `Day ${selectedBeer.day_number} — ${selectedBeer.name}: ` : '');
-
-    if (!selectedBeer) {
-      setSelectedWallLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    setSelectedWallLoading(true);
-    fetchBeerWallActivity(selectedBeer.id, 3)
-      .then((activity) => {
-        if (!cancelled) setSelectedWallActivity(activity);
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          const message = err instanceof Error ? err.message : 'Could not load related Wall activity.';
-          setSelectedWallError(message);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setSelectedWallLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
+    setSelectedWallPostText('');
   }, [selectedBeer]);
 
-  // Load today's Wall activity for the Your Beer tab (Part 6 parity with Calendar detail)
+  // Today wall post composer state (Your Beer tab) — activity list removed in v1.0.58+
   useEffect(() => {
-    setTodayWallActivity([]);
-    setTodayWallError(null);
     setTodayWallPosted(false);
-    setTodayWallPostText(todayBeer ? `Day ${todayBeer.day_number} — ${todayBeer.name}: ` : '');
-
-    if (mode !== 'yourBeer' || !todayBeer) {
-      setTodayWallLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    setTodayWallLoading(true);
-    fetchBeerWallActivity(todayBeer.id, 3)
-      .then((activity) => {
-        if (!cancelled) setTodayWallActivity(activity);
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          const message = err instanceof Error ? err.message : 'Could not load related Wall activity.';
-          setTodayWallError(message);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setTodayWallLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [mode, todayBeer]);
+    setTodayWallPostText('');
+  }, [todayBeer]);
 
   const openBeerDetail = (beer: Beer) => {
     setSelectedBeer(beer);
@@ -389,12 +308,8 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
     setSelectedRating(null);
     setRatingError(null);
     setRatingSaving(false);
-    setSelectedNotesText('');
-    setSelectedNotesSaving(false);
-    setSelectedNotesSaved(false);
     setSelectedRatingSummary({ average: null, count: 0 });
     setSelectedRatingSummaryLoading(false);
-    setSelectedWallActivity([]);
     setSelectedWallError(null);
     setSelectedWallPostText('');
     setSelectedWallPosting(false);
@@ -429,9 +344,6 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
     setTodayRatingSaving(true);
     setTodayRatingError(null);
     try {
-      // Stars-only save on tap — parity with Calendar detail modal star-tap behavior.
-      // Notes are saved separately via handleSaveTodayNotes; do not overwrite unsaved
-      // notes text the user may be editing.
       const rating = await upsertUserBeerRating(user.id, todayBeer.id, stars);
       setTodayRating(rating);
       // Refresh society aggregate — non-fatal if it fails.
@@ -448,63 +360,6 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
     }
   };
 
-  const handleSaveSelectedNotes = async () => {
-    if (!user || !selectedBeer || selectedNotesSaving || !selectedRating) return;
-    setSelectedNotesSaving(true);
-    setSelectedNotesSaved(false);
-    setRatingError(null);
-    try {
-      const rating = await upsertUserBeerRating(
-        user.id,
-        selectedBeer.id,
-        selectedRating.stars,
-        selectedNotesText.trim() || null,
-      );
-      setSelectedRating(rating);
-      setSelectedNotesText(rating.notes ?? '');
-      setSelectedNotesSaved(true);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Could not save your review.';
-      setRatingError(message);
-    } finally {
-      setSelectedNotesSaving(false);
-    }
-  };
-
-  const handleSaveTodayNotes = async () => {
-    if (!user || !todayBeer || todayNotesSaving || !todayRating) return;
-    setTodayNotesSaving(true);
-    setTodayNotesSaved(false);
-    setTodayRatingError(null);
-    try {
-      const rating = await upsertUserBeerRating(
-        user.id,
-        todayBeer.id,
-        todayRating.stars,
-        todayNotesText.trim() || null,
-      );
-      setTodayRating(rating);
-      setTodayNotesText(rating.notes ?? '');
-      setTodayNotesSaved(true);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Could not save your review.';
-      setTodayRatingError(message);
-    } finally {
-      setTodayNotesSaving(false);
-    }
-  };
-
-  const openBeerWall = (beer: Beer | null) => {
-    if (!beer || !onOpenWallForBeer) return;
-    closeBeerDetail();
-    onOpenWallForBeer({
-      id: beer.id,
-      name: beer.name,
-      dayNumber: beer.day_number,
-      brewery: beer.brewery,
-    });
-  };
-
   const handleSelectedWallPost = async () => {
     if (!user || !selectedBeer || selectedWallPosting) return;
     const trimmed = selectedWallPostText.trim();
@@ -518,14 +373,8 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
     setSelectedWallPosted(false);
     try {
       await createBeerWallPost(user.id, selectedBeer.id, trimmed);
-      setSelectedWallPostText(`Day ${selectedBeer.day_number} — ${selectedBeer.name}: `);
+      setSelectedWallPostText('');
       setSelectedWallPosted(true);
-      // Non-blocking activity refresh — failure must not overwrite post success.
-      try {
-        setSelectedWallActivity(await fetchBeerWallActivity(selectedBeer.id, 3));
-      } catch (refreshErr) {
-        console.warn('[BeerScreen] Wall activity refresh failed after post (non-fatal):', refreshErr);
-      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not post to the Wall.';
       setSelectedWallError(message);
@@ -547,14 +396,8 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
     setTodayWallPosted(false);
     try {
       await createBeerWallPost(user.id, todayBeer.id, trimmed);
-      setTodayWallPostText(`Day ${todayBeer.day_number} — ${todayBeer.name}: `);
+      setTodayWallPostText('');
       setTodayWallPosted(true);
-      // Non-blocking activity refresh — failure must not overwrite post success.
-      try {
-        setTodayWallActivity(await fetchBeerWallActivity(todayBeer.id, 3));
-      } catch (refreshErr) {
-        console.warn('[BeerScreen] Today Wall activity refresh failed after post (non-fatal):', refreshErr);
-      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not post to the Wall.';
       setTodayWallError(message);
@@ -566,29 +409,17 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
   const renderRatingPanel = ({
     errorMessage,
     loadingRating,
-    notesSaved,
-    notesText,
-    onNotesChange,
     onRate,
-    onSaveNotes,
     rating,
-    savingNotes,
     savingRating,
   }: {
     errorMessage: string | null;
     loadingRating: boolean;
-    notesSaved: boolean;
-    notesText: string;
-    onNotesChange: (t: string) => void;
     onRate: (stars: number) => void;
-    onSaveNotes: () => void;
     rating: BeerRating | null;
-    savingNotes: boolean;
     savingRating: boolean;
   }) => {
-    const savedNotes = rating?.notes?.trim() ?? '';
-    const notesChanged = notesText.trim() !== savedNotes;
-    const busy = savingRating || savingNotes;
+    const busy = savingRating;
 
     return (
     <View style={styles.ratingCard}>
@@ -618,29 +449,8 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
                   );
                 })}
               </View>
-              <TextInput
-                style={styles.notesInput}
-                placeholder="Add a tasting note or review… (optional)"
-                placeholderTextColor={COLORS.muted}
-                multiline
-                numberOfLines={3}
-                value={notesText}
-                onChangeText={onNotesChange}
-                editable={!busy && !!rating}
-              />
               {!rating ? (
-                <Text style={styles.ratingHelpText}>Tap stars to rate — then add a review note.</Text>
-              ) : notesChanged ? (
-                <TouchableOpacity
-                  style={[styles.saveNotesButton, busy && styles.saveNotesButtonDisabled]}
-                  onPress={onSaveNotes}
-                  disabled={busy}
-                  activeOpacity={0.82}
-                >
-                  <Text style={styles.saveNotesText}>{savingNotes ? 'Saving…' : 'Save Review'}</Text>
-                </TouchableOpacity>
-              ) : notesSaved ? (
-                <Text style={styles.notesSavedText}>✓ Review saved</Text>
+                <Text style={styles.ratingHelpText}>Tap a star to rate this beer.</Text>
               ) : null}
             </>
           )}
@@ -729,11 +539,6 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
                   <Text style={styles.wallPrimaryButtonText}>Post</Text>
                 )}
               </TouchableOpacity>
-              {onOpenWallForBeer ? (
-                <TouchableOpacity style={styles.wallSecondaryButton} onPress={() => openBeerWall(beer)} activeOpacity={0.78}>
-                  <Text style={styles.wallSecondaryButtonText}>Open Wall + Photos</Text>
-                </TouchableOpacity>
-              ) : null}
             </View>
             {selectedWallPosted ? <Text style={styles.wallSuccessText}>Posted to the Wall for this beer.</Text> : null}
           </>
@@ -742,44 +547,11 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
         )}
 
         {selectedWallError ? <Text style={styles.ratingErrorText}>{selectedWallError}</Text> : null}
-
-        <View style={styles.relatedWallHeader}>
-          <Text style={styles.factLabel}>What Others Are Saying</Text>
-          {onOpenWallForBeer ? (
-            <TouchableOpacity onPress={() => openBeerWall(beer)} activeOpacity={0.78}>
-              <Text style={styles.wallLinkText}>See all ›</Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
-        {selectedWallLoading ? (
-          <View style={styles.ratingLoadingRow}>
-            <ActivityIndicator color={COLORS.gold} />
-            <Text style={styles.ratingHelpText}>Loading related Wall posts...</Text>
-          </View>
-        ) : selectedWallActivity.length > 0 ? (
-          <View style={styles.relatedWallList}>
-            {selectedWallActivity.map((post) => (
-              <View key={post.id} style={styles.relatedWallPost}>
-                <Text style={styles.relatedWallMeta}>
-                  {post.author} · {formatWallTimestamp(post.created_at)}
-                </Text>
-                {post.content ? <Text style={styles.relatedWallContent}>{post.content}</Text> : null}
-                {post.photo_url ? <Text style={styles.relatedWallMeta}>Photo attached</Text> : null}
-                <Text style={styles.relatedWallCounts}>
-                  {post.reactionCount} reactions · {post.commentCount} comments
-                </Text>
-              </View>
-            ))}
-          </View>
-        ) : (
-          <Text style={styles.ratingHelpText}>No Wall posts are tagged to this beer yet. Be the first to start the discussion.</Text>
-        )}
       </View>
     );
   };
 
-  // Renders the inline post-to-Wall composer + related Wall activity for today's beer
-  // (Your Beer tab Parts 5 & 6 — mirrors renderSelectedWallPanel for Calendar detail parity)
+  // Renders the inline post-to-Wall composer for today's beer (Your Beer tab)
   const renderTodayWallPanel = (beer: Beer) => {
     const canPublish = Boolean(user && todayWallPostText.trim() && !todayWallPosting);
 
@@ -816,11 +588,6 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
                   <Text style={styles.wallPrimaryButtonText}>Post</Text>
                 )}
               </TouchableOpacity>
-              {onOpenWallForBeer ? (
-                <TouchableOpacity style={styles.wallSecondaryButton} onPress={() => openBeerWall(beer)} activeOpacity={0.78}>
-                  <Text style={styles.wallSecondaryButtonText}>Open Wall + Photos</Text>
-                </TouchableOpacity>
-              ) : null}
             </View>
             {todayWallPosted ? <Text style={styles.wallSuccessText}>Posted to the Wall for this beer.</Text> : null}
           </>
@@ -829,38 +596,6 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
         )}
 
         {todayWallError ? <Text style={styles.ratingErrorText}>{todayWallError}</Text> : null}
-
-        <View style={styles.relatedWallHeader}>
-          <Text style={styles.factLabel}>What Others Are Saying</Text>
-          {onOpenWallForBeer ? (
-            <TouchableOpacity onPress={() => openBeerWall(beer)} activeOpacity={0.78}>
-              <Text style={styles.wallLinkText}>See all ›</Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
-        {todayWallLoading ? (
-          <View style={styles.ratingLoadingRow}>
-            <ActivityIndicator color={COLORS.gold} />
-            <Text style={styles.ratingHelpText}>Loading related Wall posts...</Text>
-          </View>
-        ) : todayWallActivity.length > 0 ? (
-          <View style={styles.relatedWallList}>
-            {todayWallActivity.map((post) => (
-              <View key={post.id} style={styles.relatedWallPost}>
-                <Text style={styles.relatedWallMeta}>
-                  {post.author} · {formatWallTimestamp(post.created_at)}
-                </Text>
-                {post.content ? <Text style={styles.relatedWallContent}>{post.content}</Text> : null}
-                {post.photo_url ? <Text style={styles.relatedWallMeta}>Photo attached</Text> : null}
-                <Text style={styles.relatedWallCounts}>
-                  {post.reactionCount} reactions · {post.commentCount} comments
-                </Text>
-              </View>
-            ))}
-          </View>
-        ) : (
-          <Text style={styles.ratingHelpText}>No Wall posts are tagged to this beer yet. Be the first to start the discussion.</Text>
-        )}
       </View>
     );
   };
@@ -987,13 +722,8 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
         {renderRatingPanel({
           errorMessage: todayRatingError,
           loadingRating: todayRatingLoading,
-          notesSaved: todayNotesSaved,
-          notesText: todayNotesText,
-          onNotesChange: setTodayNotesText,
           onRate: (stars) => void handleRateTodayBeer(stars),
-          onSaveNotes: () => void handleSaveTodayNotes(),
           rating: todayRating,
-          savingNotes: todayNotesSaving,
           savingRating: todayRatingSaving,
         })}
         {renderTodayWallPanel(todayBeer)}
@@ -1067,6 +797,8 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
 
     const meta = formatBeerMeta(selectedBeer);
     const isSelectedToday = selectedBeer.day_number === todayDay;
+    // Past day = revealed but not today. Only today's beer gets the inline Wall composer.
+    const isPastDay = !isSelectedToday;
 
     return (
       <Modal visible transparent animationType="fade" onRequestClose={closeBeerDetail} statusBarTranslucent>
@@ -1136,16 +868,11 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
               {renderRatingPanel({
                 errorMessage: ratingError,
                 loadingRating: ratingLoading,
-                notesSaved: selectedNotesSaved,
-                notesText: selectedNotesText,
-                onNotesChange: setSelectedNotesText,
                 onRate: (stars) => void handleRateSelectedBeer(stars),
-                onSaveNotes: () => void handleSaveSelectedNotes(),
                 rating: selectedRating,
-                savingNotes: selectedNotesSaving,
                 savingRating: ratingSaving,
               })}
-              {renderSelectedWallPanel(selectedBeer)}
+              {!isPastDay ? renderSelectedWallPanel(selectedBeer) : null}
             </ScrollView>
             </KeyboardAvoidingView>
           </View>
@@ -1744,6 +1471,8 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 22,
+    lineHeight: 22,
+    textAlign: 'center',
   },
   starTextActive: {
     color: COLORS.gold,
