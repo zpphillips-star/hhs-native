@@ -143,6 +143,13 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
   const [selectedWallPostText, setSelectedWallPostText] = useState('');
   const [selectedWallPosting, setSelectedWallPosting] = useState(false);
   const [selectedWallPosted, setSelectedWallPosted] = useState(false);
+  // Today wall post / activity state (Your Beer tab, Parts 5 & 6)
+  const [todayWallActivity, setTodayWallActivity] = useState<BeerWallActivity[]>([]);
+  const [todayWallLoading, setTodayWallLoading] = useState(false);
+  const [todayWallError, setTodayWallError] = useState<string | null>(null);
+  const [todayWallPostText, setTodayWallPostText] = useState('');
+  const [todayWallPosting, setTodayWallPosting] = useState(false);
+  const [todayWallPosted, setTodayWallPosted] = useState(false);
 
   const now = useMemo(() => getEffectiveNow(), []);
   const calendarState = useMemo(() => getCalendarState(now), [now]);
@@ -327,6 +334,39 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
     };
   }, [selectedBeer]);
 
+  // Load today's Wall activity for the Your Beer tab (Part 6 parity with Calendar detail)
+  useEffect(() => {
+    setTodayWallActivity([]);
+    setTodayWallError(null);
+    setTodayWallPosted(false);
+    setTodayWallPostText(todayBeer ? `Day ${todayBeer.day_number} — ${todayBeer.name}: ` : '');
+
+    if (mode !== 'yourBeer' || !todayBeer) {
+      setTodayWallLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setTodayWallLoading(true);
+    fetchBeerWallActivity(todayBeer.id, 3)
+      .then((activity) => {
+        if (!cancelled) setTodayWallActivity(activity);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          const message = err instanceof Error ? err.message : 'Could not load related Wall activity.';
+          setTodayWallError(message);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setTodayWallLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, todayBeer]);
+
   const openBeerDetail = (beer: Beer) => {
     setSelectedBeer(beer);
   };
@@ -478,6 +518,35 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
       setSelectedWallError(message);
     } finally {
       setSelectedWallPosting(false);
+    }
+  };
+
+  const handleTodayWallPost = async () => {
+    if (!user || !todayBeer || todayWallPosting) return;
+    const trimmed = todayWallPostText.trim();
+    if (!trimmed) {
+      setTodayWallError('Write a Wall post before publishing.');
+      return;
+    }
+
+    setTodayWallPosting(true);
+    setTodayWallError(null);
+    setTodayWallPosted(false);
+    try {
+      await createBeerWallPost(user.id, todayBeer.id, trimmed);
+      setTodayWallPostText(`Day ${todayBeer.day_number} — ${todayBeer.name}: `);
+      setTodayWallPosted(true);
+      // Non-blocking activity refresh — failure must not overwrite post success.
+      try {
+        setTodayWallActivity(await fetchBeerWallActivity(todayBeer.id, 3));
+      } catch (refreshErr) {
+        console.warn('[BeerScreen] Today Wall activity refresh failed after post (non-fatal):', refreshErr);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not post to the Wall.';
+      setTodayWallError(message);
+    } finally {
+      setTodayWallPosting(false);
     }
   };
 
@@ -696,6 +765,93 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
     );
   };
 
+  // Renders the inline post-to-Wall composer + related Wall activity for today's beer
+  // (Your Beer tab Parts 5 & 6 — mirrors renderSelectedWallPanel for Calendar detail parity)
+  const renderTodayWallPanel = (beer: Beer) => {
+    const canPublish = Boolean(user && todayWallPostText.trim() && !todayWallPosting);
+
+    return (
+      <View style={styles.wallHubCard}>
+        <Text style={styles.factLabel}>Post to the Wall</Text>
+        <Text style={styles.wallHelpText}>
+          Share a beer-tagged post for Day {beer.day_number}. Photo posting remains available from the filtered Wall composer.
+        </Text>
+
+        {user ? (
+          <>
+            <TextInput
+              style={styles.wallPostInput}
+              placeholder="Share your thoughts on this beer..."
+              placeholderTextColor={COLORS.muted}
+              multiline
+              numberOfLines={3}
+              value={todayWallPostText}
+              onChangeText={setTodayWallPostText}
+              editable={!todayWallPosting}
+              textAlignVertical="top"
+            />
+            <View style={styles.wallActionRow}>
+              <TouchableOpacity
+                style={[styles.wallPrimaryButton, !canPublish && styles.wallButtonDisabled]}
+                onPress={() => void handleTodayWallPost()}
+                disabled={!canPublish}
+                activeOpacity={0.82}
+              >
+                {todayWallPosting ? (
+                  <ActivityIndicator color={COLORS.background} size="small" />
+                ) : (
+                  <Text style={styles.wallPrimaryButtonText}>Post</Text>
+                )}
+              </TouchableOpacity>
+              {onOpenWallForBeer ? (
+                <TouchableOpacity style={styles.wallSecondaryButton} onPress={() => openBeerWall(beer)} activeOpacity={0.78}>
+                  <Text style={styles.wallSecondaryButtonText}>Open Wall + Photos</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+            {todayWallPosted ? <Text style={styles.wallSuccessText}>Posted to the Wall for this beer.</Text> : null}
+          </>
+        ) : (
+          <Text style={styles.ratingHelpText}>Sign in from The Settings tab or web view to post about this beer.</Text>
+        )}
+
+        {todayWallError ? <Text style={styles.ratingErrorText}>{todayWallError}</Text> : null}
+
+        <View style={styles.relatedWallHeader}>
+          <Text style={styles.factLabel}>What Others Are Saying</Text>
+          {onOpenWallForBeer ? (
+            <TouchableOpacity onPress={() => openBeerWall(beer)} activeOpacity={0.78}>
+              <Text style={styles.wallLinkText}>See all ›</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+        {todayWallLoading ? (
+          <View style={styles.ratingLoadingRow}>
+            <ActivityIndicator color={COLORS.gold} />
+            <Text style={styles.ratingHelpText}>Loading related Wall posts...</Text>
+          </View>
+        ) : todayWallActivity.length > 0 ? (
+          <View style={styles.relatedWallList}>
+            {todayWallActivity.map((post) => (
+              <View key={post.id} style={styles.relatedWallPost}>
+                <Text style={styles.relatedWallMeta}>
+                  {post.author} · {formatWallTimestamp(post.created_at)}
+                </Text>
+                {post.content ? <Text style={styles.relatedWallContent}>{post.content}</Text> : null}
+                {post.photo_url ? <Text style={styles.relatedWallMeta}>Photo attached</Text> : null}
+                <Text style={styles.relatedWallCounts}>
+                  {post.reactionCount} reactions · {post.commentCount} comments
+                </Text>
+              </View>
+            ))}
+          </View>
+        ) : (
+          <Text style={styles.ratingHelpText}>No Wall posts are tagged to this beer yet. Be the first to start the discussion.</Text>
+        )}
+      </View>
+    );
+  };
+
   const renderCalendarIntro = () => {
     if (isBeforeStart) {
       const countdown = getCountdownParts(now);
@@ -827,17 +983,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
           savingNotes: todayNotesSaving,
           savingRating: todayRatingSaving,
         })}
-        <View style={styles.actionGrid}>
-          <TouchableOpacity
-            style={styles.dailyActionCard}
-            onPress={() => openBeerWall(todayBeer)}
-            disabled={!onOpenWallForBeer}
-            activeOpacity={0.82}
-          >
-            <Text style={styles.dailyActionTitle}>Post to the Wall</Text>
-            <Text style={styles.dailyActionText}>Open the beer-tagged Wall composer for posts, photos, comments, and reactions.</Text>
-          </TouchableOpacity>
-        </View>
+        {renderTodayWallPanel(todayBeer)}
       </View>
     );
   };
