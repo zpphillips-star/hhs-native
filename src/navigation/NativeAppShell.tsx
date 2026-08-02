@@ -7,7 +7,9 @@ import { HHS_WEB_ORIGIN, USE_NATIVE_BEER_SCREEN } from '../config/env';
 import { AuthProvider } from '../features/auth/AuthProvider';
 import { NativeBeerScreen } from '../features/beers/NativeBeerScreen';
 import { NativeRankingsScreen } from '../features/rankings/NativeRankingsScreen';
+import { NativeAccountSettingsScreen } from '../features/settings/NativeAccountSettingsScreen';
 import { NativeWallBeerContext, NativeWallScreen } from '../features/wall/NativeWallScreen';
+import { syncDailyBeerReminderOnStartup } from '../features/notifications/dailyBeerReminderService';
 import { HHS_COLORS, HHS_STYLES, HHS_TYPOGRAPHY } from '../theme/hhsTheme';
 
 type NativeTabId = 'calendar' | 'wall' | 'yourBeer' | 'rankings' | 'settings';
@@ -55,6 +57,12 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
   const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
   const [wallBeerContext, setWallBeerContext] = useState<NativeWallBeerContext | null>(null);
   const insets = useSafeAreaInsets();
+
+  // Startup sync: re-schedule daily beer reminder if it was cleared (e.g. by an app update)
+  // without ever prompting for permission.
+  useEffect(() => {
+    void syncDailyBeerReminderOnStartup();
+  }, []);
 
   const selectedRoute = NATIVE_TABS.find((tab) => tab.id === selectedTab) ?? NATIVE_TABS[0];
   const activeWebPath = selectedRoute.webPath;
@@ -142,13 +150,13 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
           ) : contentMode === 'rankings' ? (
             <NativeRankingsScreen onOpenAuth={openAuth} />
           ) : contentMode === 'auth' ? (
-            fallback('/auth?hhs_app=1')
+            <NativeAccountSettingsScreen mode="auth" onBack={returnToYourBeer} onOpenAuth={openAuth} />
           ) : contentMode === 'aboutHhs' ? (
-            fallback('/?hhs_app=1')
+            <NativeAccountSettingsScreen mode="about" onBack={returnToYourBeer} onOpenAuth={openAuth} />
           ) : contentMode === 'feedback' ? (
-            fallback('/feedback?hhs_app=1')
+            <NativeAccountSettingsScreen mode="feedback" onBack={returnToYourBeer} onOpenAuth={openAuth} />
           ) : contentMode === 'settingsPage' ? (
-            <NativeSettingsInfoScreen onBack={returnToYourBeer} onOpenAuth={openAuth} />
+            <NativeAccountSettingsScreen mode="settings" onBack={returnToYourBeer} onOpenAuth={openAuth} />
           ) : (
             fallback(activeWebPath)
           )}
@@ -223,27 +231,6 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
         </Modal>
       </View>
     </>
-  );
-}
-
-function NativeSettingsInfoScreen({ onBack, onOpenAuth }: { onBack: () => void; onOpenAuth: () => void }) {
-  return (
-    <View style={styles.settingsInfoScreen}>
-      <View style={styles.settingsInfoCard}>
-        <Text style={styles.settingsInfoKicker}>Hallowed Hop Society</Text>
-        <Text style={styles.settingsInfoTitle}>The Settings</Text>
-        <Text style={styles.settingsInfoBody}>
-          Notification preferences require a signed-in Society account. This recovery build keeps the
-          production web app as the source of truth for account, membership, payment, and feedback flows.
-        </Text>
-        <TouchableOpacity style={styles.settingsInfoPrimaryButton} onPress={onOpenAuth} activeOpacity={0.82}>
-          <Text style={styles.settingsInfoPrimaryText}>Sign in on the web</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.settingsInfoSecondaryButton} onPress={onBack} activeOpacity={0.78}>
-          <Text style={styles.settingsInfoSecondaryText}>Back to Your Beer</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
   );
 }
 
@@ -416,73 +403,6 @@ const styles = StyleSheet.create({
     marginTop: 16,
     opacity: 0.72,
     textAlign: 'center',
-  },
-  settingsInfoScreen: {
-    alignItems: 'center',
-    backgroundColor: HHS_COLORS.background,
-    flex: 1,
-    justifyContent: 'center',
-    padding: 20,
-  },
-  settingsInfoCard: {
-    backgroundColor: HHS_COLORS.card,
-    borderColor: HHS_COLORS.border,
-    borderRadius: HHS_STYLES.cardRadius,
-    borderWidth: 1,
-    padding: 22,
-    width: '100%',
-  },
-  settingsInfoKicker: {
-    ...HHS_TYPOGRAPHY.kicker,
-    color: HHS_COLORS.gold,
-    fontSize: 11,
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  settingsInfoTitle: {
-    ...HHS_TYPOGRAPHY.display,
-    color: HHS_COLORS.text,
-    fontSize: 28,
-    fontWeight: '700',
-    marginBottom: 14,
-    textAlign: 'center',
-  },
-  settingsInfoBody: {
-    ...HHS_TYPOGRAPHY.body,
-    color: HHS_COLORS.muted,
-    fontSize: 16,
-    lineHeight: 25,
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  settingsInfoPrimaryButton: {
-    alignItems: 'center',
-    backgroundColor: HHS_COLORS.gold,
-    borderRadius: HHS_STYLES.pillRadius,
-    marginTop: 4,
-    paddingHorizontal: 18,
-    paddingVertical: 13,
-  },
-  settingsInfoPrimaryText: {
-    ...HHS_TYPOGRAPHY.body,
-    color: HHS_COLORS.background,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  settingsInfoSecondaryButton: {
-    alignItems: 'center',
-    borderColor: HHS_COLORS.borderStrong,
-    borderRadius: HHS_STYLES.pillRadius,
-    borderWidth: 1,
-    marginTop: 12,
-    paddingHorizontal: 18,
-    paddingVertical: 13,
-  },
-  settingsInfoSecondaryText: {
-    ...HHS_TYPOGRAPHY.body,
-    color: HHS_COLORS.text,
-    fontSize: 15,
-    fontWeight: '600',
   },
   aboutScreen: {
     backgroundColor: HHS_COLORS.background,

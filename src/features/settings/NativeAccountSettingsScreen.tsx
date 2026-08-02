@@ -20,6 +20,7 @@ import {
   unregisterCachedPushToken,
   type PushPermissionStatus,
 } from '../notifications/pushRegistrationService';
+import { syncDailyBeerReminder } from '../notifications/dailyBeerReminderService';
 import { useAuth } from '../auth/AuthProvider';
 import {
   applyNotificationPreferenceToggle,
@@ -30,6 +31,12 @@ import {
   type HhsProfile,
   type NotificationPreferences,
 } from './accountSettingsService';
+import {
+  getEffectiveBeerVisibilityPreference,
+  normalizeMembershipTier,
+  saveBeerVisibilityPreference,
+  type BeerVisibilityPreference,
+} from '../membership/beerVisibilityService';
 import { HHS_COLORS, HHS_STYLES, HHS_TYPOGRAPHY } from '../../theme/hhsTheme';
 
 const COLORS = HHS_COLORS;
@@ -42,8 +49,9 @@ type NativeAccountSettingsScreenProps = {
 };
 
 function formatTier(tier: string | null | undefined) {
-  if (tier === 'hallowed') return 'Hallowed · 31 beers';
-  if (tier === 'oddballs') return 'Oddballs · 16 beers';
+  const normalized = normalizeMembershipTier(tier);
+  if (normalized === 'hallowed') return 'Hallowed · 31 beers';
+  if (normalized === 'oddballs') return 'Oddballs · 16 beers';
   return 'Not selected';
 }
 
@@ -53,11 +61,15 @@ function formatStatus(status: string | null | undefined) {
 }
 
 function getDisplayName(profile: HhsProfile | null, fallbackEmail: string | undefined) {
-  if (profile?.display_name) return profile.display_name;
-  if (profile?.username) return profile.username;
   const fullName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ').trim();
   if (fullName) return fullName;
-  return fallbackEmail ?? 'Signed-in member';
+  const nativeDisplayName = profile?.display_name_native?.trim();
+  if (nativeDisplayName) return nativeDisplayName;
+  const displayName = profile?.display_name?.trim();
+  if (displayName) return displayName;
+  const username = profile?.username?.trim();
+  if (username) return username;
+  return fallbackEmail?.trim() ?? 'Signed-in member';
 }
 
 type PreferenceRowProps = {
@@ -113,6 +125,8 @@ export function NativeAccountSettingsScreen({
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [prefSavingKey, setPrefSavingKey] = useState<keyof NotificationPreferences | null>(null);
   const [prefError, setPrefError] = useState<string | null>(null);
+  const [beerVisibilitySaving, setBeerVisibilitySaving] = useState(false);
+  const [beerVisibilityError, setBeerVisibilityError] = useState<string | null>(null);
   const [pushStatus, setPushStatus] = useState<PushPermissionStatus>('unknown');
   const [pushMessage, setPushMessage] = useState<string | null>(null);
   const [registeringPush, setRegisteringPush] = useState(false);
@@ -124,6 +138,7 @@ export function NativeAccountSettingsScreen({
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
 
   const displayName = useMemo(() => getDisplayName(profile, user?.email), [profile, user?.email]);
+  const normalizedTier = useMemo(() => normalizeMembershipTier(profile?.tier), [profile?.tier]);
 
   const loadAccountDetails = useCallback(async (showRefresh = false) => {
     if (!user?.id) {
@@ -131,6 +146,7 @@ export function NativeAccountSettingsScreen({
       setPrefs(DEFAULT_NOTIFICATION_PREFERENCES);
       setDetailsError(null);
       setPrefError(null);
+      setBeerVisibilityError(null);
       setPushMessage(null);
       setPushStatus('unknown');
       setLoadingDetails(false);
@@ -146,18 +162,30 @@ export function NativeAccountSettingsScreen({
     setDetailsError(null);
 
     try {
-      const [nextProfile, nextPrefs] = await Promise.all([
-        fetchCurrentUserProfile(user.id),
-        fetchNotificationPreferences(user.id),
-      ]);
+      const nextProfile = await fetchCurrentUserProfile(user.id);
       setProfile(nextProfile);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not load account profile.';
+      setProfile(null);
+      setDetailsError(`Profile: ${message}`);
+    }
+
+    try {
+      const nextPrefs = await fetchNotificationPreferences(user.id);
       setPrefs(nextPrefs);
       setPrefError(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not load notification preferences.';
+      setPrefError(message);
+    }
+
+    try {
       const nextPushStatus = await getCurrentPushPermissionStatus();
       setPushStatus(nextPushStatus);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Could not load account details.';
-      setDetailsError(message);
+      const message = err instanceof Error ? err.message : 'Could not read push permission status.';
+      setPushStatus('unknown');
+      setPushMessage(message);
     } finally {
       setLoadingDetails(false);
       setRefreshing(false);
@@ -188,21 +216,57 @@ export function NativeAccountSettingsScreen({
     async (key: keyof NotificationPreferences, value: boolean) => {
       if (!user?.id || prefSavingKey) return;
 
+      const previousPrefs = prefs;
       const nextPrefs = applyNotificationPreferenceToggle(prefs, key, value);
       setPrefSavingKey(key);
       setPrefError(null);
+      setPrefs(nextPrefs);
 
       try {
         await saveNotificationPreferences(user.id, profile?.email ?? user.email, nextPrefs);
-        setPrefs(nextPrefs);
+        // Sync daily local reminder if the daily_beer toggle changed.
+        if (key === 'daily_beer') {
+          void syncDailyBeerReminder(value);
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Could not save notification preferences.';
+        setPrefs(previousPrefs);
         setPrefError(message);
       } finally {
         setPrefSavingKey(null);
       }
     },
     [prefSavingKey, prefs, profile?.email, user?.email, user?.id],
+  );
+
+  const handleBeerVisibilityChange = useCallback(
+    async (showAll: boolean) => {
+      if (!user?.id || beerVisibilitySaving || normalizedTier !== 'oddballs') return;
+
+      const previousProfile = profile;
+      const nextPreference: BeerVisibilityPreference = showAll ? 'all' : 'participating_only';
+      setBeerVisibilitySaving(true);
+      setBeerVisibilityError(null);
+      setProfile((current) =>
+        current
+          ? {
+              ...current,
+              beer_visibility_preference: nextPreference,
+            }
+          : current,
+      );
+
+      try {
+        await saveBeerVisibilityPreference(user.id, nextPreference);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Could not save beer visibility preference.';
+        setProfile(previousProfile);
+        setBeerVisibilityError(message);
+      } finally {
+        setBeerVisibilitySaving(false);
+      }
+    },
+    [beerVisibilitySaving, normalizedTier, profile, user?.id],
   );
 
   const handleSignIn = async () => {
@@ -338,11 +402,13 @@ export function NativeAccountSettingsScreen({
       <View style={styles.infoGrid}>
         <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>Username</Text>
-          <Text style={styles.infoValue}>{profile?.username ?? profile?.display_name ?? displayName}</Text>
+          <Text style={styles.infoValue}>
+            {profile?.username?.trim() || profile?.display_name_native?.trim() || profile?.display_name?.trim() || displayName}
+          </Text>
         </View>
         <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>Email</Text>
-          <Text style={styles.infoValue}>{profile?.email ?? user?.email ?? 'Unknown'}</Text>
+          <Text style={styles.infoValue}>{profile?.email?.trim() || user?.email || 'Unknown'}</Text>
         </View>
         <View style={styles.infoRow}>
           <Text style={styles.infoLabel}>Member Status</Text>
@@ -442,6 +508,50 @@ export function NativeAccountSettingsScreen({
     </View>
   );
 
+  const renderBeerVisibilitySettings = () => {
+    if (!user || !profile) return null;
+
+    const effectivePreference = getEffectiveBeerVisibilityPreference(
+      normalizedTier,
+      profile.beer_visibility_preference ?? null,
+    );
+
+    if (normalizedTier === 'hallowed') {
+      return (
+        <View style={styles.card}>
+          <Text style={styles.sectionKicker}>Beer Visibility</Text>
+          <Text style={styles.cardTitle}>Full Calendar Included</Text>
+          <Text style={styles.bodyText}>
+            Your Hallowed membership includes all 31 beers. The Calendar, Your Beer, and Top Beers show the full
+            revealed lineup.
+          </Text>
+        </View>
+      );
+    }
+
+    if (normalizedTier !== 'oddballs') return null;
+
+    return (
+      <View style={styles.card}>
+        <Text style={styles.sectionKicker}>Beer Visibility</Text>
+        <Text style={styles.cardTitle}>Oddballs Calendar</Text>
+        <Text style={styles.bodyText}>
+          Oddballs participate in odd-numbered beer days. Turn this on to peek at all revealed beers while keeping
+          even days marked as Full Society / not participating.
+        </Text>
+        {beerVisibilityError ? <Text style={styles.errorText}>{beerVisibilityError}</Text> : null}
+        <PreferenceRow
+          disabled={beerVisibilitySaving}
+          enabled={effectivePreference === 'all'}
+          label="Show all 31 beers"
+          description="Even-day beers stay read-only: no rating and no beer-specific Wall post."
+          onValueChange={(value) => void handleBeerVisibilityChange(value)}
+        />
+        {beerVisibilitySaving ? <Text style={styles.settingsSavingText}>Saving beer visibility…</Text> : null}
+      </View>
+    );
+  };
+
   const renderSignOutPage = () => (
     <>
       {renderAccountSummary()}
@@ -501,6 +611,7 @@ export function NativeAccountSettingsScreen({
       {user ? (
         <>
           {renderAccountSummary()}
+          {renderBeerVisibilitySettings()}
           {renderNotificationSettings()}
         </>
       ) : (
