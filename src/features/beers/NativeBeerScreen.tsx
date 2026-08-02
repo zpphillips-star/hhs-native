@@ -1169,17 +1169,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
             />
           }
         >
-          {/* Only show the screen header in yourBeer mode; Calendar's intro section provides its own context */}
-          {mode === 'yourBeer' ? (
-            <View style={styles.header}>
-              <View>
-                <Text style={styles.appKicker}>Hallowed Hop Society</Text>
-                <Text style={styles.headerTitle}>Your Beer</Text>
-              </View>
-            </View>
-          ) : null}
-
-          {loading ? (
+          {loading ?(
             <View style={styles.loadingCard}>
               <ActivityIndicator color={COLORS.gold} size="large" />
               <Text style={styles.loadingText}>Loading the sacred list...</Text>
