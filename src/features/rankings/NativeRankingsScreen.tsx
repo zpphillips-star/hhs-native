@@ -1,17 +1,17 @@
 /**
- * NativeRankingsScreen — Batch 1 shell
+ * NativeRankingsScreen — Batch 2
  *
  * Layout:
  *   • Page header: "The Society Standings" + subheading
  *   • Two top-tabs: "Top Beers" | "Members"
- *   • Top Beers tab: loading / empty / error scaffold (no scoring data yet)
- *   • Members tab: auth gate → sign-in CTA if logged out; empty scaffold if signed in
- *   • Pull-to-refresh scaffold on both tabs
- *
- * Batch 2 will add real Supabase queries for rankings/member scores.
+ *   • Top Beers tab: real Supabase leaderboard — medal/rank, beer name,
+ *     brewery + Day N, star display, avg + count; #1 row gets a gold tint.
+ *   • Members tab: auth gate → sign-in CTA if logged out; empty scaffold
+ *     if signed in (member scoring is a future batch).
+ *   • Pull-to-refresh triggers a full data re-fetch on the active tab.
  */
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   RefreshControl,
@@ -25,12 +25,28 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../auth/AuthProvider';
 import { HHS_COLORS, HHS_STYLES, HHS_TYPOGRAPHY } from '../../theme/hhsTheme';
+import { fetchTopBeers, type RankedBeer } from './rankingsService';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type RankingsTab = 'topBeers' | 'members';
 
 type LoadState = 'idle' | 'loading' | 'empty' | 'error';
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function rankMedal(rank: number): string {
+  if (rank === 1) return '🥇';
+  if (rank === 2) return '🥈';
+  if (rank === 3) return '🥉';
+  return `#${rank}`;
+}
+
+/** Render filled + empty stars matching the pattern used on NativeBeerScreen */
+function starsDisplay(avg: number): string {
+  const filled = Math.round(avg);
+  return '★'.repeat(filled) + '☆'.repeat(5 - filled);
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -42,15 +58,44 @@ export type NativeRankingsScreenProps = {
 export function NativeRankingsScreen({ onOpenAuth }: NativeRankingsScreenProps) {
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<RankingsTab>('topBeers');
-  const [topBeersState] = useState<LoadState>('empty'); // Batch 2 will drive this
-  const [membersState] = useState<LoadState>('empty');  // Batch 2 will drive this
+
+  // ── Top Beers state ──
+  const [topBeersLoadState, setTopBeersLoadState] = useState<LoadState>('idle');
+  const [topBeers, setTopBeers] = useState<RankedBeer[]>([]);
+  const [topBeersError, setTopBeersError] = useState<string | null>(null);
+
+  // ── Members state (scaffold — no scoring yet) ──
+  const [membersLoadState] = useState<LoadState>('empty');
+
   const [refreshing, setRefreshing] = useState(false);
 
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    // Batch 2: trigger real data re-fetch here
-    setTimeout(() => setRefreshing(false), 800);
+  // Load top beers on mount
+  const loadTopBeers = useCallback(async () => {
+    setTopBeersLoadState('loading');
+    setTopBeersError(null);
+    try {
+      const ranked = await fetchTopBeers();
+      setTopBeers(ranked);
+      setTopBeersLoadState(ranked.length === 0 ? 'empty' : 'idle');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      console.warn('[HHS Rankings] fetchTopBeers failed:', msg);
+      setTopBeersError(msg);
+      setTopBeersLoadState('error');
+    }
   }, []);
+
+  useEffect(() => {
+    void loadTopBeers();
+  }, [loadTopBeers]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    if (activeTab === 'topBeers') {
+      await loadTopBeers();
+    }
+    setRefreshing(false);
+  }, [activeTab, loadTopBeers]);
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
@@ -85,9 +130,20 @@ export function NativeRankingsScreen({ onOpenAuth }: NativeRankingsScreenProps) 
 
       {/* ── Tab content ── */}
       {activeTab === 'topBeers' ? (
-        <TopBeersTab state={topBeersState} refreshing={refreshing} onRefresh={onRefresh} />
+        <TopBeersTab
+          loadState={topBeersLoadState}
+          rankings={topBeers}
+          errorMessage={topBeersError}
+          refreshing={refreshing}
+          onRefresh={() => void onRefresh()}
+        />
       ) : (
-        <MembersTab state={membersState} refreshing={refreshing} onRefresh={onRefresh} onOpenAuth={onOpenAuth} />
+        <MembersTab
+          state={membersLoadState}
+          refreshing={refreshing}
+          onRefresh={() => void onRefresh()}
+          onOpenAuth={onOpenAuth}
+        />
       )}
     </View>
   );
@@ -96,11 +152,15 @@ export function NativeRankingsScreen({ onOpenAuth }: NativeRankingsScreenProps) 
 // ─── Top Beers tab ────────────────────────────────────────────────────────────
 
 function TopBeersTab({
-  state,
+  loadState,
+  rankings,
+  errorMessage,
   refreshing,
   onRefresh,
 }: {
-  state: LoadState;
+  loadState: LoadState;
+  rankings: RankedBeer[];
+  errorMessage: string | null;
   refreshing: boolean;
   onRefresh: () => void;
 }) {
@@ -110,30 +170,80 @@ function TopBeersTab({
       contentContainerStyle={styles.tabContentInner}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={HHS_COLORS.gold} />}
     >
-      {state === 'loading' && (
+      {loadState === 'loading' && (
         <View style={styles.centerBox}>
           <ActivityIndicator size="large" color={HHS_COLORS.gold} />
           <Text style={styles.statusText}>Loading standings…</Text>
         </View>
       )}
-      {state === 'error' && (
+      {loadState === 'error' && (
         <View style={styles.centerBox}>
           <Text style={styles.errorText}>Couldn&apos;t load beer rankings.</Text>
+          {errorMessage ? (
+            <Text style={styles.errorDetail}>{errorMessage}</Text>
+          ) : null}
           <Text style={styles.statusText}>Pull down to try again.</Text>
         </View>
       )}
-      {state === 'empty' && (
+      {loadState === 'empty' && (
         <View style={styles.centerBox}>
           <Text style={styles.emptyIcon}>🍺</Text>
-          <Text style={styles.emptyTitle}>Rankings Coming Soon</Text>
+          <Text style={styles.emptyTitle}>No Rankings Yet</Text>
           <Text style={styles.emptyBody}>
             Top-beer standings will appear here once the Society starts rating this month&apos;s lineup.
             Pull down to refresh.
           </Text>
         </View>
       )}
-      {/* Batch 2: render ranked beer rows here */}
+      {loadState === 'idle' && rankings.length > 0 && (
+        <View style={styles.leaderboard}>
+          {rankings.map((item) => (
+            <BeerRankingRow key={item.beer.id} item={item} />
+          ))}
+        </View>
+      )}
     </ScrollView>
+  );
+}
+
+// ─── Beer ranking row ─────────────────────────────────────────────────────────
+
+function BeerRankingRow({ item }: { item: RankedBeer }) {
+  const isFirst = item.rank === 1;
+  const medalText = rankMedal(item.rank);
+  const isMedalEmoji = item.rank <= 3;
+
+  return (
+    <View style={[styles.rankRow, isFirst && styles.rankRowFirst]}>
+      {/* Medal / rank badge */}
+      <View style={styles.rankBadge}>
+        {isMedalEmoji ? (
+          <Text style={styles.medalEmoji}>{medalText}</Text>
+        ) : (
+          <Text style={[styles.rankNumber, isFirst && styles.rankNumberFirst]}>{medalText}</Text>
+        )}
+      </View>
+
+      {/* Beer info */}
+      <View style={styles.rankInfo}>
+        <Text style={[styles.beerName, isFirst && styles.beerNameFirst]} numberOfLines={1}>
+          {item.beer.name}
+        </Text>
+        <Text style={styles.beerMeta} numberOfLines={1}>
+          {item.beer.brewery} · Day {item.beer.day_number}
+        </Text>
+
+        {/* Stars + numeric */}
+        <View style={styles.ratingRow}>
+          <Text style={[styles.starsText, isFirst && styles.starsTextFirst]}>
+            {starsDisplay(item.avgStars)}
+          </Text>
+          <Text style={styles.ratingDetail}>
+            {item.avgStars.toFixed(1)} · {item.ratingCount} {item.ratingCount === 1 ? 'rating' : 'ratings'}
+          </Text>
+        </View>
+      </View>
+    </View>
   );
 }
 
@@ -282,7 +392,7 @@ const styles = StyleSheet.create({
   },
   tabContentInner: {
     flexGrow: 1,
-    padding: 20,
+    padding: 16,
   },
 
   // State boxes
@@ -327,6 +437,13 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     textAlign: 'center',
   },
+  errorDetail: {
+    ...HHS_TYPOGRAPHY.body,
+    color: HHS_COLORS.muted,
+    fontSize: 13,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
 
   // Auth gate
   authGate: {
@@ -348,5 +465,80 @@ const styles = StyleSheet.create({
     color: HHS_COLORS.background,
     fontSize: 15,
     fontWeight: '700',
+  },
+
+  // Leaderboard
+  leaderboard: {
+    gap: 10,
+  },
+  rankRow: {
+    backgroundColor: HHS_COLORS.card,
+    borderColor: HHS_COLORS.border,
+    borderRadius: HHS_STYLES.cardRadius,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 12,
+    padding: 14,
+  },
+  rankRowFirst: {
+    backgroundColor: 'rgba(217, 124, 43, 0.10)',
+    borderColor: HHS_COLORS.borderStrong,
+  },
+  rankBadge: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 38,
+  },
+  medalEmoji: {
+    fontSize: 28,
+    lineHeight: 34,
+    textAlign: 'center',
+  },
+  rankNumber: {
+    ...HHS_TYPOGRAPHY.display,
+    color: HHS_COLORS.muted,
+    fontSize: 15,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  rankNumberFirst: {
+    color: HHS_COLORS.gold,
+  },
+  rankInfo: {
+    flex: 1,
+    gap: 3,
+  },
+  beerName: {
+    ...HHS_TYPOGRAPHY.display,
+    color: HHS_COLORS.text,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  beerNameFirst: {
+    color: HHS_COLORS.goldLight,
+  },
+  beerMeta: {
+    ...HHS_TYPOGRAPHY.body,
+    color: HHS_COLORS.muted,
+    fontSize: 13,
+  },
+  ratingRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 4,
+  },
+  starsText: {
+    color: HHS_COLORS.muted,
+    fontSize: 16,
+    lineHeight: 20,
+  },
+  starsTextFirst: {
+    color: HHS_COLORS.gold,
+  },
+  ratingDetail: {
+    ...HHS_TYPOGRAPHY.body,
+    color: HHS_COLORS.muted,
+    fontSize: 13,
   },
 });
