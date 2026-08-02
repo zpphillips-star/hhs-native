@@ -1,0 +1,29 @@
+v1.0.69 (vc70) — Daily 4PM Beer Reminder
+Build date: 2026-08-02 16:46:50
+Commit: f0fbdc111598501dc0f4a81b5b14aed0ef701813
+
+Changes:
+- NEW: src/features/notifications/dailyBeerReminderService.ts
+  * 31-message rotating copy pool (generic, no beer name/details)
+  * Android channel: hhs-daily-beer (HIGH importance, gold light color)
+  * scheduleDailyBeerReminder(): cancel-then-schedule at 4:00 PM local daily
+  * cancelDailyBeerReminder(): cancel by stable identifier to avoid duplicates
+  * syncDailyBeerReminder(enabled): called on setting toggle; caches pref locally;
+    only schedules if permission already granted (no auto-prompt)
+  * syncDailyBeerReminderOnStartup(): called at app boot; re-schedules only if
+    not already queued (handles app update clearing scheduled notifications);
+    never requests permission
+
+- MODIFIED: src/features/settings/NativeAccountSettingsScreen.tsx
+  * Import syncDailyBeerReminder
+  * handlePreferenceChange: calls syncDailyBeerReminder(value) when daily_beer toggles
+
+- MODIFIED: src/navigation/NativeAppShell.tsx
+  * Import syncDailyBeerReminderOnStartup
+  * NativeAppShellContent: useEffect on mount calls syncDailyBeerReminderOnStartup()
+
+AAB artifact: hhs-v1.0.69-vc70-DAILY-REMINDER-SIGNED-WITH-PLAY-KEY-20260802-164504.aab
+SHA-256: B6805E89EB4E001FA6BAC1FBB9D9510A314E056F46911B4A26DE6297E50E108A
+Signing: CN=Hallowed Hop Society, OU=Z-Plot Industries, O=Z-Plot Industries, L=Vancouver, ST=WA, C=US
+Check 1 (manifest version): versionName=1.0.69, versionCode=70 — PASS
+Check 2 (signing): jar verified — PASS
