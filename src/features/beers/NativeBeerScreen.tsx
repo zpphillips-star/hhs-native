@@ -1,4 +1,4 @@
-import { StatusBar } from 'expo-status-bar';
+﻿import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -30,8 +30,21 @@ import {
 import type { Beer, BeerRating, BeerRatingSummary, BeerWallActivity } from './types';
 
 const COLORS = HHS_COLORS;
+
+// ─── LAUNCH MODE CONFIG ──────────────────────────────────────────────────────
+// Set BEER_CALENDAR_PREVIEW_MODE = true  for internal/test builds (August live,
+// all beer flows accessible now).
+// Set BEER_CALENDAR_PREVIEW_MODE = false for the production October launch
+// (hides beers until October 1, shows countdown, uses real October dates).
+//
+// TO SWITCH TO OCTOBER LAUNCH: change the line below to `false` and rebuild.
+// ─────────────────────────────────────────────────────────────────────────────
+const BEER_CALENDAR_PREVIEW_MODE = true;
+
 const BEER_CALENDAR_YEAR = 2026;
-const BEER_CALENDAR_MONTH_INDEX = 9;
+// Month index is 0-based: 7 = August (preview), 9 = October (launch)
+const BEER_CALENDAR_MONTH_INDEX = BEER_CALENDAR_PREVIEW_MODE ? 7 : 9;
+const BEER_CALENDAR_MONTH_NAME = BEER_CALENDAR_PREVIEW_MODE ? 'August' : 'October';
 const BEER_CALENDAR_DAYS = 31;
 
 type NativeBeerScreenProps = {
@@ -58,11 +71,11 @@ function formatWallTimestamp(value: string) {
   }
 }
 
-function getOctoberStart() {
+function getCalendarStart() {
   return new Date(BEER_CALENDAR_YEAR, BEER_CALENDAR_MONTH_INDEX, 1);
 }
 
-function getOctoberEnd() {
+function getCalendarEnd() {
   return new Date(BEER_CALENDAR_YEAR, BEER_CALENDAR_MONTH_INDEX, BEER_CALENDAR_DAYS, 23, 59, 59, 999);
 }
 
@@ -79,14 +92,14 @@ function getEffectiveNow() {
 }
 
 function getCountdownText(now: Date) {
-  const diff = Math.max(0, getOctoberStart().getTime() - now.getTime());
+  const diff = Math.max(0, getCalendarStart().getTime() - now.getTime());
   const days = Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)));
   const hours = Math.max(0, Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)));
   return `${days} days · ${hours} hrs`;
 }
 
 function getCountdownParts(now: Date) {
-  const diff = Math.max(0, getOctoberStart().getTime() - now.getTime());
+  const diff = Math.max(0, getCalendarStart().getTime() - now.getTime());
   return {
     days: Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24))),
     hours: Math.max(0, Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))),
@@ -94,16 +107,16 @@ function getCountdownParts(now: Date) {
 }
 
 function getCalendarState(now: Date) {
-  const isBeforeStart = now.getTime() < getOctoberStart().getTime();
-  const isActiveOctober =
+  const isBeforeStart = now.getTime() < getCalendarStart().getTime();
+  const isActiveMonth =
     now.getFullYear() === BEER_CALENDAR_YEAR && now.getMonth() === BEER_CALENDAR_MONTH_INDEX;
-  const isComplete = now.getTime() > getOctoberEnd().getTime();
-  const todayDay = isActiveOctober ? now.getDate() : null;
-  const revealedThroughDay = isActiveOctober ? now.getDate() : isComplete ? BEER_CALENDAR_DAYS : null;
+  const isComplete = now.getTime() > getCalendarEnd().getTime();
+  const todayDay = isActiveMonth ? now.getDate() : null;
+  const revealedThroughDay = isActiveMonth ? now.getDate() : isComplete ? BEER_CALENDAR_DAYS : null;
 
   return {
     isBeforeStart,
-    isActiveOctober,
+    isActiveMonth,
     isComplete,
     revealedThroughDay,
     todayDay,
@@ -153,7 +166,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
 
   const now = useMemo(() => getEffectiveNow(), []);
   const calendarState = useMemo(() => getCalendarState(now), [now]);
-  const { isActiveOctober, isBeforeStart, isComplete, revealedThroughDay, todayDay } = calendarState;
+  const { isActiveMonth, isBeforeStart, isComplete, revealedThroughDay, todayDay } = calendarState;
 
   const beerMap = useMemo(() => {
     const map = new Map<number, Beer>();
@@ -862,7 +875,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
             <Text style={styles.kicker}>The Calendar Is Being Set</Text>
             <View style={styles.ritualLine} />
           </View>
-          <Text style={styles.countdownLabel}>October 1st begins in</Text>
+          <Text style={styles.countdownLabel}>{BEER_CALENDAR_MONTH_NAME} 1st begins in</Text>
           <View style={styles.countdownRow}>
             <Text style={styles.countdownNumber}>{countdown.days}</Text>
             <Text style={styles.countdownUnit}>days</Text>
@@ -872,7 +885,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
           </View>
           <View style={styles.manifestoCard}>
             <Text style={styles.manifestoText}>
-              Every October, the Society convenes. Thirty-one days. Thirty-one beers. The deliberation is
+              Every {BEER_CALENDAR_MONTH_NAME}, the Society convenes. Thirty-one days. Thirty-one beers. The deliberation is
               underway — each selection debated, contested, and earned. The calendar isn’t set yet. But it
               will be.
             </Text>
@@ -887,7 +900,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
     if (isComplete) {
       return (
         <View style={styles.heroCard}>
-          <Text style={styles.kicker}>October {BEER_CALENDAR_YEAR}</Text>
+          <Text style={styles.kicker}>{BEER_CALENDAR_MONTH_NAME} {BEER_CALENDAR_YEAR}</Text>
           <Text style={styles.bodyText}>
             The 2026 ritual is complete. All thirty-one beers are now visible in the archive below.
           </Text>
@@ -897,7 +910,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
 
     return (
       <View style={styles.heroCard}>
-        <Text style={styles.kicker}>October {BEER_CALENDAR_YEAR}</Text>
+        <Text style={styles.kicker}>{BEER_CALENDAR_MONTH_NAME} {BEER_CALENDAR_YEAR}</Text>
         <Text style={styles.bodyText}>
           Revealed beers are visible through today. Future pours stay hidden until their day arrives.
         </Text>
@@ -906,7 +919,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
   };
 
   const renderYourBeer = () => {
-    if (isActiveOctober && !todayBeer) {
+    if (isActiveMonth && !todayBeer) {
       return (
         <View style={styles.messageCard}>
           <Text style={styles.messageText}>Today&apos;s beer hasn&apos;t been added yet. Check back soon.</Text>
@@ -914,7 +927,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
       );
     }
 
-    if (!isActiveOctober || !todayBeer) {
+    if (!isActiveMonth || !todayBeer) {
       return (
         <View style={styles.heroCard}>
           <Text style={styles.kicker}>Your Beer Awaits</Text>
@@ -922,7 +935,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
           <Text style={styles.bodyText}>
             {isComplete
               ? 'The 2026 calendar is complete. Use The Calendar to revisit the revealed beers.'
-              : 'Today’s beer becomes the center ritual when October 2026 begins. Until then, the circle is gathering and the taps remain under wraps.'}
+              : `Today\u2019s beer becomes the center ritual when ${BEER_CALENDAR_MONTH_NAME} ${BEER_CALENDAR_YEAR} begins. Until then, the circle is gathering and the taps remain under wraps.`}
           </Text>
         </View>
       );
@@ -933,7 +946,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
       <View style={styles.todaySection}>
         <Text style={styles.kicker}>Today&apos;s Beer</Text>
         <Text style={styles.dayLabel}>
-          Day {todayBeer.day_number} · October {todayBeer.day_number}, {BEER_CALENDAR_YEAR}
+          Day {todayBeer.day_number} · {BEER_CALENDAR_MONTH_NAME} {todayBeer.day_number}, {BEER_CALENDAR_YEAR}
         </Text>
         {todayBeer.image_url ? (
           <Image source={{ uri: todayBeer.image_url }} style={styles.heroImage} resizeMode="cover" />
@@ -1061,7 +1074,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalDayLabel}>
-                {isSelectedToday ? 'Today · ' : ''}Day {selectedBeer.day_number} · October {selectedBeer.day_number}, {BEER_CALENDAR_YEAR}
+                {isSelectedToday ? 'Today · ' : ''}Day {selectedBeer.day_number} · {BEER_CALENDAR_MONTH_NAME} {selectedBeer.day_number}, {BEER_CALENDAR_YEAR}
               </Text>
               <TouchableOpacity style={styles.closeButton} onPress={closeBeerDetail} accessibilityLabel="Close beer detail">
                 <Text style={styles.closeButtonText}>✕</Text>
@@ -1188,7 +1201,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
               <>
                 {renderCalendarIntro()}
                 <View style={styles.calendarHeader}>
-                  <Text style={styles.calendarTitle}>October {BEER_CALENDAR_YEAR}</Text>
+                  <Text style={styles.calendarTitle}>{BEER_CALENDAR_MONTH_NAME} {BEER_CALENDAR_YEAR}</Text>
                   <View style={styles.calendarRule} />
                 </View>
                 {renderList()}
