@@ -25,3 +25,13 @@ export type BeerRatingSummary = {
   average: number | null;
   count: number;
 };
+
+export type BeerWallActivity = {
+  id: string;
+  content: string;
+  photo_url: string | null;
+  created_at: string;
+  author: string;
+  reactionCount: number;
+  commentCount: number;
+};

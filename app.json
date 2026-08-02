@@ -2,7 +2,7 @@
   "expo": {
     "name": "Hallowed Hop Society",
     "slug": "hhs-native",
-    "version": "1.0.43",
+    "version": "1.0.48",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -26,7 +26,7 @@
         "backgroundColor": "#191726"
       },
       "package": "com.zplotindustries.hallowedhopsociety",
-      "versionCode": 44,
+      "versionCode": 49,
       "permissions": [
         "INTERNET",
         "POST_NOTIFICATIONS",
@@ -58,7 +58,6 @@
     },
     "extra": {
       "hhsNativeBeerScreen": "1",
-      "hhsTestDate": "2026-10-29T12:00:00",
       "eas": {
         "projectId": "7c415298-5d23-4f3d-b818-60a6ba5475a2"
       }
@@ -66,7 +65,8 @@
     "owner": "z-plot-industries",
     "plugins": [
       "expo-notifications",
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-image-picker"
     ],
     "scheme": "hhs",
     "description": "Hallowed Hop Society — 31 unique beers in 31 haunted days.",

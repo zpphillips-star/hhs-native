@@ -19,8 +19,15 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../auth/AuthProvider';
 import { HHS_TEST_DATE } from '../../config/env';
 import { HHS_COLORS, HHS_STYLES, HHS_TYPOGRAPHY } from '../../theme/hhsTheme';
-import { fetchBeerRatingSummary, fetchBeers, fetchUserBeerRating, upsertUserBeerRating } from './beerService';
-import type { Beer, BeerRating, BeerRatingSummary } from './types';
+import {
+  createBeerWallPost,
+  fetchBeerRatingSummary,
+  fetchBeers,
+  fetchBeerWallActivity,
+  fetchUserBeerRating,
+  upsertUserBeerRating,
+} from './beerService';
+import type { Beer, BeerRating, BeerRatingSummary, BeerWallActivity } from './types';
 
 const COLORS = HHS_COLORS;
 const BEER_CALENDAR_YEAR = 2026;
@@ -30,11 +37,25 @@ const BEER_CALENDAR_DAYS = 31;
 type NativeBeerScreenProps = {
   mode?: 'calendar' | 'yourBeer';
   onOpenWebFallback?: (path?: string) => void;
+  onOpenWallForBeer?: (beer: { id: string; name: string; dayNumber: number; brewery?: string | null }) => void;
 };
 
 function formatBeerMeta(beer: Beer) {
   const parts = [beer.style, beer.abv ? `${beer.abv}% ABV` : null].filter(Boolean);
   return parts.join(' · ');
+}
+
+function formatWallTimestamp(value: string) {
+  try {
+    return new Date(value).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  } catch {
+    return '';
+  }
 }
 
 function getOctoberStart() {
@@ -48,16 +69,13 @@ function getOctoberEnd() {
 function getEffectiveNow() {
   if (!HHS_TEST_DATE) return new Date();
 
-  // HHS_TEST_DATE is the simulated-October anchor date baked into the build.
-  // Instead of freezing at that date, we advance it by one day for every real
-  // calendar day elapsed since the build was first deployed (Jul 29 2026).
-  // Jul 29 real → Oct 29 simulated; Jul 30 real → Oct 30 simulated, etc.
-  const testAnchor = new Date(HHS_TEST_DATE);
-  if (Number.isNaN(testAnchor.getTime())) return new Date();
+  // HHS_TEST_DATE is the exact simulated calendar date baked into the internal
+  // validation build. Do not advance it by real elapsed days; Zach expects the
+  // native Calendar to open on this fake day whenever the build is tested.
+  const testDate = new Date(HHS_TEST_DATE);
+  if (Number.isNaN(testDate.getTime())) return new Date();
 
-  const REAL_DEPLOY_REF = new Date('2026-07-29T00:00:00');
-  const daysSinceDeploy = Math.floor((Date.now() - REAL_DEPLOY_REF.getTime()) / 86_400_000);
-  return new Date(testAnchor.getTime() + Math.max(0, daysSinceDeploy) * 86_400_000);
+  return testDate;
 }
 
 function getCountdownText(now: Date) {
@@ -92,7 +110,7 @@ function getCalendarState(now: Date) {
   };
 }
 
-export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
+export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: NativeBeerScreenProps) {
   const { user } = useAuth();
   const [beers, setBeers] = useState<Beer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -117,6 +135,12 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
   // Society rating summary for the detail modal
   const [selectedRatingSummary, setSelectedRatingSummary] = useState<BeerRatingSummary>({ average: null, count: 0 });
   const [selectedRatingSummaryLoading, setSelectedRatingSummaryLoading] = useState(false);
+  const [selectedWallActivity, setSelectedWallActivity] = useState<BeerWallActivity[]>([]);
+  const [selectedWallLoading, setSelectedWallLoading] = useState(false);
+  const [selectedWallError, setSelectedWallError] = useState<string | null>(null);
+  const [selectedWallPostText, setSelectedWallPostText] = useState('');
+  const [selectedWallPosting, setSelectedWallPosting] = useState(false);
+  const [selectedWallPosted, setSelectedWallPosted] = useState(false);
 
   const now = useMemo(() => getEffectiveNow(), []);
   const calendarState = useMemo(() => getCalendarState(now), [now]);
@@ -268,6 +292,38 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
     };
   }, [selectedBeer]);
 
+  useEffect(() => {
+    setSelectedWallActivity([]);
+    setSelectedWallError(null);
+    setSelectedWallPosted(false);
+    setSelectedWallPostText(selectedBeer ? `Day ${selectedBeer.day_number} — ${selectedBeer.name}: ` : '');
+
+    if (!selectedBeer) {
+      setSelectedWallLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setSelectedWallLoading(true);
+    fetchBeerWallActivity(selectedBeer.id, 3)
+      .then((activity) => {
+        if (!cancelled) setSelectedWallActivity(activity);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          const message = err instanceof Error ? err.message : 'Could not load related Wall activity.';
+          setSelectedWallError(message);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSelectedWallLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedBeer]);
+
   const openBeerDetail = (beer: Beer) => {
     setSelectedBeer(beer);
   };
@@ -281,6 +337,11 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
     setSelectedNotesSaving(false);
     setSelectedRatingSummary({ average: null, count: 0 });
     setSelectedRatingSummaryLoading(false);
+    setSelectedWallActivity([]);
+    setSelectedWallError(null);
+    setSelectedWallPostText('');
+    setSelectedWallPosting(false);
+    setSelectedWallPosted(false);
   };
 
   const handleRateSelectedBeer = async (stars: number) => {
@@ -362,6 +423,46 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
       setTodayRatingError(message);
     } finally {
       setTodayNotesSaving(false);
+    }
+  };
+
+  const openBeerWall = (beer: Beer | null) => {
+    if (!beer || !onOpenWallForBeer) return;
+    closeBeerDetail();
+    onOpenWallForBeer({
+      id: beer.id,
+      name: beer.name,
+      dayNumber: beer.day_number,
+      brewery: beer.brewery,
+    });
+  };
+
+  const handleSelectedWallPost = async () => {
+    if (!user || !selectedBeer || selectedWallPosting) return;
+    const trimmed = selectedWallPostText.trim();
+    if (!trimmed) {
+      setSelectedWallError('Write a Wall post before publishing.');
+      return;
+    }
+
+    setSelectedWallPosting(true);
+    setSelectedWallError(null);
+    setSelectedWallPosted(false);
+    try {
+      await createBeerWallPost(user.id, selectedBeer.id, trimmed);
+      setSelectedWallPostText(`Day ${selectedBeer.day_number} — ${selectedBeer.name}: `);
+      setSelectedWallPosted(true);
+      // Non-blocking activity refresh — failure must not overwrite post success.
+      try {
+        setSelectedWallActivity(await fetchBeerWallActivity(selectedBeer.id, 3));
+      } catch (refreshErr) {
+        console.warn('[BeerScreen] Wall activity refresh failed after post (non-fatal):', refreshErr);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not post to the Wall.';
+      setSelectedWallError(message);
+    } finally {
+      setSelectedWallPosting(false);
     }
   };
 
@@ -477,6 +578,91 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
     </View>
   );
 
+  const renderSelectedWallPanel = (beer: Beer) => {
+    const canPublish = Boolean(user && selectedWallPostText.trim() && !selectedWallPosting);
+
+    return (
+      <View style={styles.wallHubCard}>
+        <Text style={styles.factLabel}>Post to the Wall</Text>
+        <Text style={styles.wallHelpText}>
+          Share a beer-tagged post for Day {beer.day_number}. Photo posting remains available from the filtered Wall composer.
+        </Text>
+
+        {user ? (
+          <>
+            <TextInput
+              style={styles.wallPostInput}
+              placeholder="Share your thoughts on this beer..."
+              placeholderTextColor={COLORS.muted}
+              multiline
+              numberOfLines={3}
+              value={selectedWallPostText}
+              onChangeText={setSelectedWallPostText}
+              editable={!selectedWallPosting}
+              textAlignVertical="top"
+            />
+            <View style={styles.wallActionRow}>
+              <TouchableOpacity
+                style={[styles.wallPrimaryButton, !canPublish && styles.wallButtonDisabled]}
+                onPress={() => void handleSelectedWallPost()}
+                disabled={!canPublish}
+                activeOpacity={0.82}
+              >
+                {selectedWallPosting ? (
+                  <ActivityIndicator color={COLORS.background} size="small" />
+                ) : (
+                  <Text style={styles.wallPrimaryButtonText}>Post</Text>
+                )}
+              </TouchableOpacity>
+              {onOpenWallForBeer ? (
+                <TouchableOpacity style={styles.wallSecondaryButton} onPress={() => openBeerWall(beer)} activeOpacity={0.78}>
+                  <Text style={styles.wallSecondaryButtonText}>Open Wall + Photos</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+            {selectedWallPosted ? <Text style={styles.wallSuccessText}>Posted to the Wall for this beer.</Text> : null}
+          </>
+        ) : (
+          <Text style={styles.ratingHelpText}>Sign in from The Settings tab or web view to post about this beer.</Text>
+        )}
+
+        {selectedWallError ? <Text style={styles.ratingErrorText}>{selectedWallError}</Text> : null}
+
+        <View style={styles.relatedWallHeader}>
+          <Text style={styles.factLabel}>What Others Are Saying</Text>
+          {onOpenWallForBeer ? (
+            <TouchableOpacity onPress={() => openBeerWall(beer)} activeOpacity={0.78}>
+              <Text style={styles.wallLinkText}>See all ›</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+        {selectedWallLoading ? (
+          <View style={styles.ratingLoadingRow}>
+            <ActivityIndicator color={COLORS.gold} />
+            <Text style={styles.ratingHelpText}>Loading related Wall posts...</Text>
+          </View>
+        ) : selectedWallActivity.length > 0 ? (
+          <View style={styles.relatedWallList}>
+            {selectedWallActivity.map((post) => (
+              <View key={post.id} style={styles.relatedWallPost}>
+                <Text style={styles.relatedWallMeta}>
+                  {post.author} · {formatWallTimestamp(post.created_at)}
+                </Text>
+                {post.content ? <Text style={styles.relatedWallContent}>{post.content}</Text> : null}
+                {post.photo_url ? <Text style={styles.relatedWallMeta}>Photo attached</Text> : null}
+                <Text style={styles.relatedWallCounts}>
+                  {post.reactionCount} reactions · {post.commentCount} comments
+                </Text>
+              </View>
+            ))}
+          </View>
+        ) : (
+          <Text style={styles.ratingHelpText}>No Wall posts are tagged to this beer yet. Be the first to start the discussion.</Text>
+        )}
+      </View>
+    );
+  };
+
   const renderCalendarIntro = () => {
     if (isBeforeStart) {
       const countdown = getCountdownParts(now);
@@ -566,7 +752,11 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
         <Text style={styles.beerTitle}>{todayBeer.name}</Text>
         <Text style={styles.breweryTitle}>{todayBeer.brewery}</Text>
         {meta ? <Text style={styles.metaText}>{meta}</Text> : null}
-        {todayBeer.description ? <Text style={styles.descriptionText}>{todayBeer.description}</Text> : null}
+        {todayBeer.description ? (
+          <Text style={styles.descriptionText}>{todayBeer.description}</Text>
+        ) : (
+          <Text style={styles.missingDataText}>No description field has been added for this beer yet.</Text>
+        )}
         {(todayBeer.beer_fact || todayBeer.brewery_fact) ? (
           <View style={styles.factCard}>
             {todayBeer.beer_fact ? (
@@ -597,16 +787,15 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
           savingRating: todayRatingSaving,
         })}
         <View style={styles.actionGrid}>
-          <View style={styles.placeholderAction}>
-            <Text style={styles.placeholderActionTitle}>Post to the Wall</Text>
-            <Text style={styles.placeholderActionText}>
-              Native wall posting is not wired yet. Use The Wall tab for the current web flow.
-            </Text>
-          </View>
-          <View style={styles.placeholderAction}>
-            <Text style={styles.placeholderActionTitle}>Check-In</Text>
-            <Text style={styles.placeholderActionText}>Native wall posts and check-ins are planned for a later pass.</Text>
-          </View>
+          <TouchableOpacity
+            style={styles.dailyActionCard}
+            onPress={() => openBeerWall(todayBeer)}
+            disabled={!onOpenWallForBeer}
+            activeOpacity={0.82}
+          >
+            <Text style={styles.dailyActionTitle}>Post to the Wall</Text>
+            <Text style={styles.dailyActionText}>Open the beer-tagged Wall composer for posts, photos, comments, and reactions.</Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
@@ -677,6 +866,7 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
     if (!selectedBeer) return null;
 
     const meta = formatBeerMeta(selectedBeer);
+    const isSelectedToday = selectedBeer.day_number === todayDay;
 
     return (
       <Modal visible transparent animationType="fade" onRequestClose={closeBeerDetail} statusBarTranslucent>
@@ -684,7 +874,7 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalDayLabel}>
-                Day {selectedBeer.day_number} · October {selectedBeer.day_number}, {BEER_CALENDAR_YEAR}
+                {isSelectedToday ? 'Today · ' : ''}Day {selectedBeer.day_number} · October {selectedBeer.day_number}, {BEER_CALENDAR_YEAR}
               </Text>
               <TouchableOpacity style={styles.closeButton} onPress={closeBeerDetail} accessibilityLabel="Close beer detail">
                 <Text style={styles.closeButtonText}>✕</Text>
@@ -696,6 +886,7 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
               style={styles.modalKAV}
             >
               <ScrollView contentContainerStyle={styles.modalScrollContent}>
+              <Text style={styles.hubKicker}>{isSelectedToday ? 'Here is what you do today' : 'Calendar beer detail'}</Text>
               {selectedBeer.image_url ? (
                 <Image source={{ uri: selectedBeer.image_url }} style={styles.detailImage} resizeMode="cover" />
               ) : null}
@@ -704,7 +895,11 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
               {meta ? <Text style={styles.modalMetaText}>{meta}</Text> : null}
               {selectedBeer.description ? (
                 <Text style={styles.modalDescriptionText}>{selectedBeer.description}</Text>
-              ) : null}
+              ) : (
+                <Text style={styles.missingDataText}>
+                  No description field has been added for this beer yet.
+                </Text>
+              )}
 
               {(selectedBeer.beer_fact || selectedBeer.brewery_fact) ? (
                 <View style={styles.factCard}>
@@ -722,7 +917,14 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
                     </View>
                   ) : null}
                 </View>
-              ) : null}
+              ) : (
+                <View style={styles.factCard}>
+                  <Text style={styles.factLabel}>Beer write-up</Text>
+                  <Text style={styles.factText}>
+                    No beer_fact or brewery_fact field has been added for this beer yet.
+                  </Text>
+                </View>
+              )}
 
               {/* Society rating — shown first so user sees group consensus before rating */}
               <View style={styles.ratingCard}>
@@ -761,6 +963,7 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
                 savingNotes: selectedNotesSaving,
                 savingRating: ratingSaving,
               })}
+              {renderSelectedWallPanel(selectedBeer)}
             </ScrollView>
             </KeyboardAvoidingView>
           </View>
@@ -1229,6 +1432,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.borderStrong,
     borderRadius: 18,
     borderWidth: 1,
+    height: '86%',
     maxHeight: '86%',
     overflow: 'hidden',
     width: '100%',
@@ -1290,6 +1494,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginBottom: 14,
   },
+  hubKicker: {
+    ...HHS_TYPOGRAPHY.kicker,
+    color: COLORS.gold,
+    fontSize: 10,
+    letterSpacing: 2.5,
+    marginBottom: 12,
+    textAlign: 'center',
+    textTransform: 'uppercase',
+  },
   modalDescriptionText: {
     ...HHS_TYPOGRAPHY.body,
     borderTopColor: COLORS.border,
@@ -1299,6 +1512,19 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     marginBottom: 16,
     paddingTop: 14,
+  },
+  missingDataText: {
+    ...HHS_TYPOGRAPHY.body,
+    backgroundColor: COLORS.cardAlt,
+    borderColor: COLORS.border,
+    borderRadius: 10,
+    borderWidth: 1,
+    color: COLORS.muted,
+    fontSize: 13,
+    fontStyle: 'italic',
+    lineHeight: 20,
+    marginBottom: 14,
+    padding: 12,
   },
   ratingCard: {
     backgroundColor: COLORS.cardAlt,
@@ -1392,6 +1618,145 @@ const styles = StyleSheet.create({
     color: COLORS.background,
     fontSize: 13,
     fontWeight: '700',
+  },
+  dailyActionCard: {
+    backgroundColor: COLORS.cardAlt,
+    borderColor: COLORS.border,
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 16,
+  },
+  dailyActionTitle: {
+    ...HHS_TYPOGRAPHY.display,
+    color: COLORS.text,
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  dailyActionText: {
+    ...HHS_TYPOGRAPHY.body,
+    color: COLORS.muted,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  wallHubCard: {
+    backgroundColor: COLORS.cardAlt,
+    borderColor: COLORS.border,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginTop: 14,
+    padding: 16,
+  },
+  wallHelpText: {
+    ...HHS_TYPOGRAPHY.body,
+    color: COLORS.muted,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  wallPostInput: {
+    ...HHS_TYPOGRAPHY.body,
+    backgroundColor: COLORS.background,
+    borderColor: COLORS.border,
+    borderRadius: 10,
+    borderWidth: 1,
+    color: COLORS.text,
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 12,
+    minHeight: 82,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    textAlignVertical: 'top',
+  },
+  wallActionRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 12,
+  },
+  wallPrimaryButton: {
+    alignItems: 'center',
+    backgroundColor: COLORS.gold,
+    borderRadius: HHS_STYLES.buttonRadius,
+    justifyContent: 'center',
+    minHeight: 38,
+    minWidth: 88,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+  },
+  wallPrimaryButtonText: {
+    ...HHS_TYPOGRAPHY.button,
+    color: COLORS.background,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  wallSecondaryButton: {
+    borderColor: COLORS.border,
+    borderRadius: HHS_STYLES.buttonRadius,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  wallSecondaryButtonText: {
+    ...HHS_TYPOGRAPHY.button,
+    color: COLORS.gold,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  wallButtonDisabled: {
+    opacity: 0.48,
+  },
+  wallSuccessText: {
+    ...HHS_TYPOGRAPHY.body,
+    color: COLORS.gold,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 10,
+  },
+  relatedWallHeader: {
+    alignItems: 'center',
+    borderTopColor: COLORS.border,
+    borderTopWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 16,
+    paddingTop: 14,
+  },
+  wallLinkText: {
+    ...HHS_TYPOGRAPHY.body,
+    color: COLORS.gold,
+    fontSize: 13,
+  },
+  relatedWallList: {
+    gap: 10,
+  },
+  relatedWallPost: {
+    backgroundColor: COLORS.background,
+    borderColor: COLORS.border,
+    borderRadius: 10,
+    borderWidth: 1,
+    padding: 12,
+  },
+  relatedWallMeta: {
+    ...HHS_TYPOGRAPHY.body,
+    color: COLORS.gold,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  relatedWallContent: {
+    ...HHS_TYPOGRAPHY.body,
+    color: COLORS.text,
+    fontSize: 14,
+    lineHeight: 21,
+    marginTop: 6,
+  },
+  relatedWallCounts: {
+    ...HHS_TYPOGRAPHY.body,
+    color: COLORS.muted,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 8,
   },
   listChevron: {
     ...HHS_TYPOGRAPHY.body,

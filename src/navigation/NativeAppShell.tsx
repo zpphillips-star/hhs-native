@@ -6,6 +6,7 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import { HHS_WEB_ORIGIN, USE_NATIVE_BEER_SCREEN } from '../config/env';
 import { AuthProvider } from '../features/auth/AuthProvider';
 import { NativeBeerScreen } from '../features/beers/NativeBeerScreen';
+import { NativeWallBeerContext, NativeWallScreen } from '../features/wall/NativeWallScreen';
 import { HHS_COLORS, HHS_STYLES, HHS_TYPOGRAPHY } from '../theme/hhsTheme';
 
 type NativeTabId = 'calendar' | 'wall' | 'yourBeer' | 'rankings' | 'settings';
@@ -51,6 +52,7 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
   const [selectedTab, setSelectedTab] = useState<NativeTabId>('yourBeer');
   const [contentMode, setContentMode] = useState<NativeContentMode>('yourBeer');
   const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
+  const [wallBeerContext, setWallBeerContext] = useState<NativeWallBeerContext | null>(null);
   const insets = useSafeAreaInsets();
 
   const selectedRoute = NATIVE_TABS.find((tab) => tab.id === selectedTab) ?? NATIVE_TABS[0];
@@ -90,6 +92,14 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
 
     setSelectedTab(tab.id);
     setContentMode(tab.id);
+    if (tab.id !== 'wall') setWallBeerContext(null);
+  };
+
+  const openWallForBeer = (beer: NativeWallBeerContext) => {
+    setSettingsMenuVisible(false);
+    setWallBeerContext(beer);
+    setSelectedTab('wall');
+    setContentMode('wall');
   };
 
   const openSettingsInfo = () => {
@@ -123,7 +133,9 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
           {!fontsLoaded ? (
             <View style={styles.fontLoadingScreen} />
           ) : contentMode === 'calendar' ? (
-            <NativeBeerScreen mode="calendar" />
+            <NativeBeerScreen mode="calendar" onOpenWallForBeer={openWallForBeer} />
+          ) : contentMode === 'wall' ? (
+            <NativeWallScreen initialBeerContext={wallBeerContext} />
           ) : contentMode === 'auth' ? (
             fallback('/auth?hhs_app=1')
           ) : contentMode === 'aboutHhs' ? (
