@@ -130,8 +130,10 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
   // Notes / review state
   const [selectedNotesText, setSelectedNotesText] = useState('');
   const [selectedNotesSaving, setSelectedNotesSaving] = useState(false);
+  const [selectedNotesSaved, setSelectedNotesSaved] = useState(false);
   const [todayNotesText, setTodayNotesText] = useState('');
   const [todayNotesSaving, setTodayNotesSaving] = useState(false);
+  const [todayNotesSaved, setTodayNotesSaved] = useState(false);
   // Society rating summary for the detail modal
   const [selectedRatingSummary, setSelectedRatingSummary] = useState<BeerRatingSummary>({ average: null, count: 0 });
   const [selectedRatingSummaryLoading, setSelectedRatingSummaryLoading] = useState(false);
@@ -209,6 +211,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
     setTodayRating(null);
     setTodayRatingError(null);
     setTodayNotesText('');
+    setTodayNotesSaved(false);
 
     if (mode !== 'yourBeer' || !todayBeer || !user?.id) {
       setTodayRatingLoading(false);
@@ -335,6 +338,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
     setRatingSaving(false);
     setSelectedNotesText('');
     setSelectedNotesSaving(false);
+    setSelectedNotesSaved(false);
     setSelectedRatingSummary({ average: null, count: 0 });
     setSelectedRatingSummaryLoading(false);
     setSelectedWallActivity([]);
@@ -394,6 +398,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
   const handleSaveSelectedNotes = async () => {
     if (!user || !selectedBeer || selectedNotesSaving || !selectedRating) return;
     setSelectedNotesSaving(true);
+    setSelectedNotesSaved(false);
     setRatingError(null);
     try {
       const rating = await upsertUserBeerRating(
@@ -404,6 +409,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
       );
       setSelectedRating(rating);
       setSelectedNotesText(rating.notes ?? '');
+      setSelectedNotesSaved(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not save your review.';
       setRatingError(message);
@@ -415,6 +421,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
   const handleSaveTodayNotes = async () => {
     if (!user || !todayBeer || todayNotesSaving || !todayRating) return;
     setTodayNotesSaving(true);
+    setTodayNotesSaved(false);
     setTodayRatingError(null);
     try {
       const rating = await upsertUserBeerRating(
@@ -425,6 +432,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
       );
       setTodayRating(rating);
       setTodayNotesText(rating.notes ?? '');
+      setTodayNotesSaved(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not save your review.';
       setTodayRatingError(message);
@@ -476,6 +484,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
   const renderRatingPanel = ({
     errorMessage,
     loadingRating,
+    notesSaved,
     notesText,
     onNotesChange,
     onRate,
@@ -486,6 +495,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
   }: {
     errorMessage: string | null;
     loadingRating: boolean;
+    notesSaved: boolean;
     notesText: string;
     onNotesChange: (t: string) => void;
     onRate: (stars: number) => void;
@@ -547,6 +557,8 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
                 >
                   <Text style={styles.saveNotesText}>{savingNotes ? 'Saving…' : 'Save Review'}</Text>
                 </TouchableOpacity>
+              ) : notesSaved ? (
+                <Text style={styles.notesSavedText}>✓ Review saved</Text>
               ) : null}
             </>
           )}
@@ -560,23 +572,30 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
     );
   };
 
-  const renderSocietyRatingPanel = () => (
+  const renderSocietyPanel = ({
+    average,
+    count,
+    loading,
+  }: {
+    average: number | null;
+    count: number;
+    loading: boolean;
+  }) => (
     <View style={styles.ratingCard}>
       <Text style={styles.factLabel}>Society Rating</Text>
-      {todayRatingSummaryLoading ? (
+      {loading ? (
         <View style={styles.ratingLoadingRow}>
           <ActivityIndicator color={COLORS.gold} />
           <Text style={styles.ratingHelpText}>Loading Society rating...</Text>
         </View>
-      ) : todayRatingSummary.average !== null ? (
+      ) : average !== null ? (
         <View style={styles.societyRatingRow}>
           <Text style={styles.societyStars}>
-            {'★'.repeat(Math.round(todayRatingSummary.average))}
-            {'☆'.repeat(5 - Math.round(todayRatingSummary.average))}
+            {'★'.repeat(Math.round(average))}
+            {'☆'.repeat(5 - Math.round(average))}
           </Text>
           <Text style={styles.ratingHelpText}>
-            {todayRatingSummary.average} / 5 · {todayRatingSummary.count}{' '}
-            {todayRatingSummary.count === 1 ? 'rating' : 'ratings'}
+            {average} / 5 · {count} {count === 1 ? 'rating' : 'ratings'}
           </Text>
         </View>
       ) : (
@@ -584,6 +603,13 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
       )}
     </View>
   );
+
+  const renderSocietyRatingPanel = () =>
+    renderSocietyPanel({
+      average: todayRatingSummary.average,
+      count: todayRatingSummary.count,
+      loading: todayRatingSummaryLoading,
+    });
 
   const renderSelectedWallPanel = (beer: Beer) => {
     const canPublish = Boolean(user && selectedWallPostText.trim() && !selectedWallPosting);
@@ -792,6 +818,7 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
         {renderRatingPanel({
           errorMessage: todayRatingError,
           loadingRating: todayRatingLoading,
+          notesSaved: todayNotesSaved,
           notesText: todayNotesText,
           onNotesChange: setTodayNotesText,
           onRate: (stars) => void handleRateTodayBeer(stars),
@@ -941,34 +968,16 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
               )}
 
               {/* Society rating — shown first so user sees group consensus before rating */}
-              <View style={styles.ratingCard}>
-                <Text style={styles.factLabel}>Society Rating</Text>
-                {selectedRatingSummaryLoading ? (
-                  <View style={styles.ratingLoadingRow}>
-                    <ActivityIndicator color={COLORS.gold} />
-                    <Text style={styles.ratingHelpText}>Loading Society rating...</Text>
-                  </View>
-                ) : selectedRatingSummary.average !== null ? (
-                  <View style={styles.societyRatingRow}>
-                    <Text style={styles.societyStars}>
-                      {'★'.repeat(Math.round(selectedRatingSummary.average))}
-                      {'☆'.repeat(5 - Math.round(selectedRatingSummary.average))}
-                    </Text>
-                    <Text style={styles.ratingHelpText}>
-                      {selectedRatingSummary.average} / 5 · {selectedRatingSummary.count}{' '}
-                      {selectedRatingSummary.count === 1 ? 'rating' : 'ratings'}
-                    </Text>
-                  </View>
-                ) : (
-                  <Text style={styles.ratingHelpText}>
-                    No ratings yet. Be the first Society member to weigh in.
-                  </Text>
-                )}
-              </View>
+              {renderSocietyPanel({
+                average: selectedRatingSummary.average,
+                count: selectedRatingSummary.count,
+                loading: selectedRatingSummaryLoading,
+              })}
 
               {renderRatingPanel({
                 errorMessage: ratingError,
                 loadingRating: ratingLoading,
+                notesSaved: selectedNotesSaved,
                 notesText: selectedNotesText,
                 onNotesChange: setSelectedNotesText,
                 onRate: (stars) => void handleRateSelectedBeer(stars),
@@ -1601,6 +1610,14 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.body,
     color: '#ffb4a8',
     fontSize: 13,
+    lineHeight: 19,
+    marginTop: 10,
+  },
+  notesSavedText: {
+    ...HHS_TYPOGRAPHY.body,
+    color: COLORS.gold,
+    fontSize: 13,
+    fontWeight: '700',
     lineHeight: 19,
     marginTop: 10,
   },

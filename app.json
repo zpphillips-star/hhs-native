@@ -2,7 +2,7 @@
   "expo": {
     "name": "Hallowed Hop Society",
     "slug": "hhs-native",
-    "version": "1.0.52",
+    "version": "1.0.53",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -26,7 +26,7 @@
         "backgroundColor": "#191726"
       },
       "package": "com.zplotindustries.hallowedhopsociety",
-      "versionCode": 53,
+      "versionCode": 54,
       "permissions": [
         "INTERNET",
         "POST_NOTIFICATIONS",
@@ -69,7 +69,7 @@
       "expo-image-picker"
     ],
     "scheme": "hhs",
-    "description": "Hallowed Hop Society \u00e2\u20ac\u201d 31 unique beers in 31 haunted days.",
+    "description": "Hallowed Hop Society â€” 31 unique beers in 31 haunted days.",
     "primaryColor": "#191726"
   }
 }
