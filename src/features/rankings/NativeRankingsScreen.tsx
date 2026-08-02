@@ -1,13 +1,14 @@
 /**
- * NativeRankingsScreen — Batch 2
+ * NativeRankingsScreen — Batch 3
  *
  * Layout:
  *   • Page header: "The Society Standings" + subheading
  *   • Two top-tabs: "Top Beers" | "Members"
  *   • Top Beers tab: real Supabase leaderboard — medal/rank, beer name,
  *     brewery + Day N, star display, avg + count; #1 row gets a gold tint.
- *   • Members tab: auth gate → sign-in CTA if logged out; empty scaffold
- *     if signed in (member scoring is a future batch).
+ *   • Members tab: auth gate → sign-in CTA if logged out; when signed in,
+ *     real engagement-scored leaderboard with medal/rank, display_name,
+ *     score in gold, and activity counts.
  *   • Pull-to-refresh triggers a full data re-fetch on the active tab.
  */
 
@@ -26,6 +27,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../auth/AuthProvider';
 import { HHS_COLORS, HHS_STYLES, HHS_TYPOGRAPHY } from '../../theme/hhsTheme';
 import { fetchTopBeers, type RankedBeer } from './rankingsService';
+import { fetchRankedMembers, type RankedMember } from './membersService';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -64,8 +66,12 @@ export function NativeRankingsScreen({ onOpenAuth }: NativeRankingsScreenProps) 
   const [topBeers, setTopBeers] = useState<RankedBeer[]>([]);
   const [topBeersError, setTopBeersError] = useState<string | null>(null);
 
-  // ── Members state (scaffold — no scoring yet) ──
-  const [membersLoadState] = useState<LoadState>('empty');
+  // ── Members state ──
+  const [membersLoadState, setMembersLoadState] = useState<LoadState>('idle');
+  const [members, setMembers] = useState<RankedMember[]>([]);
+  const [membersError, setMembersError] = useState<string | null>(null);
+
+  const { user } = useAuth();
 
   const [refreshing, setRefreshing] = useState(false);
 
@@ -89,13 +95,38 @@ export function NativeRankingsScreen({ onOpenAuth }: NativeRankingsScreenProps) 
     void loadTopBeers();
   }, [loadTopBeers]);
 
+  // Load members when user is authenticated and members tab becomes active
+  const loadMembers = useCallback(async () => {
+    setMembersLoadState('loading');
+    setMembersError(null);
+    try {
+      const ranked = await fetchRankedMembers();
+      setMembers(ranked);
+      setMembersLoadState(ranked.length === 0 ? 'empty' : 'idle');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      console.warn('[HHS Rankings] fetchRankedMembers failed:', msg);
+      setMembersError(msg);
+      setMembersLoadState('error');
+    }
+  }, []);
+
+  // Auto-load members when a logged-in user switches to the Members tab
+  useEffect(() => {
+    if (activeTab === 'members' && user && membersLoadState === 'idle') {
+      void loadMembers();
+    }
+  }, [activeTab, user, membersLoadState, loadMembers]);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     if (activeTab === 'topBeers') {
       await loadTopBeers();
+    } else {
+      await loadMembers();
     }
     setRefreshing(false);
-  }, [activeTab, loadTopBeers]);
+  }, [activeTab, loadTopBeers, loadMembers]);
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
@@ -139,7 +170,9 @@ export function NativeRankingsScreen({ onOpenAuth }: NativeRankingsScreenProps) 
         />
       ) : (
         <MembersTab
-          state={membersLoadState}
+          loadState={membersLoadState}
+          members={members}
+          errorMessage={membersError}
           refreshing={refreshing}
           onRefresh={() => void onRefresh()}
           onOpenAuth={onOpenAuth}
@@ -250,12 +283,16 @@ function BeerRankingRow({ item }: { item: RankedBeer }) {
 // ─── Members tab ──────────────────────────────────────────────────────────────
 
 function MembersTab({
-  state,
+  loadState,
+  members,
+  errorMessage,
   refreshing,
   onRefresh,
   onOpenAuth,
 }: {
-  state: LoadState;
+  loadState: LoadState;
+  members: RankedMember[];
+  errorMessage: string | null;
   refreshing: boolean;
   onRefresh: () => void;
   onOpenAuth: () => void;
@@ -292,29 +329,88 @@ function MembersTab({
       contentContainerStyle={styles.tabContentInner}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={HHS_COLORS.gold} />}
     >
-      {state === 'loading' && (
+      {loadState === 'loading' && (
         <View style={styles.centerBox}>
           <ActivityIndicator size="large" color={HHS_COLORS.gold} />
           <Text style={styles.statusText}>Loading members…</Text>
         </View>
       )}
-      {state === 'error' && (
+      {loadState === 'error' && (
         <View style={styles.centerBox}>
           <Text style={styles.errorText}>Couldn&apos;t load member rankings.</Text>
+          {errorMessage ? (
+            <Text style={styles.errorDetail}>{errorMessage}</Text>
+          ) : null}
           <Text style={styles.statusText}>Pull down to try again.</Text>
         </View>
       )}
-      {state === 'empty' && (
+      {loadState === 'empty' && (
         <View style={styles.centerBox}>
           <Text style={styles.emptyIcon}>🏅</Text>
-          <Text style={styles.emptyTitle}>Member Standings Coming Soon</Text>
+          <Text style={styles.emptyTitle}>No Scores Yet</Text>
           <Text style={styles.emptyBody}>
-            Member scores and leaderboard will appear here. Pull down to refresh.
+            Member standings appear here once the Society starts rating beers, posting, and reacting.
+            Pull down to refresh.
           </Text>
         </View>
       )}
-      {/* Batch 2: render member score rows here */}
+      {loadState === 'idle' && members.length > 0 && (
+        <View style={styles.leaderboard}>
+          {members.map((item) => (
+            <MemberRankingRow key={item.userId} item={item} />
+          ))}
+        </View>
+      )}
     </ScrollView>
+  );
+}
+
+// ─── Member ranking row ───────────────────────────────────────────────────────
+
+/** Compact activity summary: only show non-zero counts */
+function activityLine(item: RankedMember): string {
+  const parts: string[] = [];
+  if (item.ratingCount > 0) parts.push(`${item.ratingCount} rated`);
+  if (item.postCount > 0) parts.push(`${item.postCount} ${item.postCount === 1 ? 'post' : 'posts'}`);
+  const social = item.commentCount + item.reactionCount;
+  if (social > 0) parts.push(`${social} social`);
+  return parts.length > 0 ? parts.join(' · ') : 'No activity yet';
+}
+
+function MemberRankingRow({ item }: { item: RankedMember }) {
+  const isFirst = item.rank === 1;
+  const medalText = rankMedal(item.rank);
+  const isMedalEmoji = item.rank <= 3;
+
+  return (
+    <View style={[styles.rankRow, isFirst && styles.rankRowFirst]}>
+      {/* Medal / rank badge */}
+      <View style={styles.rankBadge}>
+        {isMedalEmoji ? (
+          <Text style={styles.medalEmoji}>{medalText}</Text>
+        ) : (
+          <Text style={[styles.rankNumber, isFirst && styles.rankNumberFirst]}>{medalText}</Text>
+        )}
+      </View>
+
+      {/* Member info */}
+      <View style={styles.rankInfo}>
+        <Text style={[styles.beerName, isFirst && styles.beerNameFirst]} numberOfLines={1}>
+          {item.displayName}
+        </Text>
+        <Text style={styles.beerMeta} numberOfLines={1}>
+          {activityLine(item)}
+        </Text>
+      </View>
+
+      {/* Score badge */}
+      <View style={styles.scoreBadge}>
+        <Text style={[styles.scoreText, isFirst && styles.scoreTextFirst]}>
+          {item.score}
+        </Text>
+        <Text style={styles.scorePtLabel}>pts</Text>
+      </View>
+    </View>
   );
 }
 
@@ -540,5 +636,29 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.body,
     color: HHS_COLORS.muted,
     fontSize: 13,
+  },
+
+  // Member score badge
+  scoreBadge: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 44,
+  },
+  scoreText: {
+    ...HHS_TYPOGRAPHY.display,
+    color: HHS_COLORS.gold,
+    fontSize: 22,
+    fontWeight: '700',
+    lineHeight: 26,
+    textAlign: 'center',
+  },
+  scoreTextFirst: {
+    color: HHS_COLORS.goldLight,
+  },
+  scorePtLabel: {
+    ...HHS_TYPOGRAPHY.body,
+    color: HHS_COLORS.muted,
+    fontSize: 11,
+    textAlign: 'center',
   },
 });
