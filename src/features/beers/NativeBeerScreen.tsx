@@ -818,7 +818,6 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
               style={styles.modalKAV}
             >
               <ScrollView contentContainerStyle={styles.modalScrollContent}>
-              <Text style={styles.hubKicker}>{isSelectedToday ? 'Here is what you do today' : 'Calendar beer detail'}</Text>
               {selectedBeer.image_url ? (
                 <Image source={{ uri: selectedBeer.image_url }} style={styles.detailImage} resizeMode="cover" />
               ) : null}
@@ -1456,16 +1455,12 @@ const styles = StyleSheet.create({
   },
   starButton: {
     alignItems: 'center',
-    borderColor: COLORS.border,
-    borderRadius: HHS_STYLES.pillRadius,
-    borderWidth: 1,
     height: 42,
     justifyContent: 'center',
     width: 42,
   },
   starButtonActive: {
-    backgroundColor: 'rgba(217, 124, 43, 0.16)',
-    borderColor: COLORS.gold,
+    // active state conveyed by starTextActive color — no background or border
   },
   starText: {
     ...HHS_TYPOGRAPHY.body,
