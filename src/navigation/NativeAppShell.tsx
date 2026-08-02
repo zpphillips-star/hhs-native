@@ -134,6 +134,8 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
             <View style={styles.fontLoadingScreen} />
           ) : contentMode === 'calendar' ? (
             <NativeBeerScreen mode="calendar" onOpenWallForBeer={openWallForBeer} />
+          ) : contentMode === 'yourBeer' ? (
+            <NativeBeerScreen mode="yourBeer" onOpenWallForBeer={openWallForBeer} />
           ) : contentMode === 'wall' ? (
             <NativeWallScreen initialBeerContext={wallBeerContext} />
           ) : contentMode === 'auth' ? (
