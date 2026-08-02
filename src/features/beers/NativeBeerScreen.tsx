@@ -372,10 +372,17 @@ export function NativeBeerScreen({ mode = 'calendar', onOpenWallForBeer }: Nativ
     setTodayRatingSaving(true);
     setTodayRatingError(null);
     try {
-      const rating = await upsertUserBeerRating(user.id, todayBeer.id, stars, todayNotesText.trim() || null);
+      // Stars-only save on tap — parity with Calendar detail modal star-tap behavior.
+      // Notes are saved separately via handleSaveTodayNotes; do not overwrite unsaved
+      // notes text the user may be editing.
+      const rating = await upsertUserBeerRating(user.id, todayBeer.id, stars);
       setTodayRating(rating);
-      setTodayNotesText(rating.notes ?? todayNotesText);
-      setTodayRatingSummary(await fetchBeerRatingSummary(todayBeer.id));
+      // Refresh society aggregate — non-fatal if it fails.
+      try {
+        setTodayRatingSummary(await fetchBeerRatingSummary(todayBeer.id));
+      } catch {
+        // Non-fatal: summary stays as-is if the refresh fails.
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not save your rating.';
       setTodayRatingError(message);
