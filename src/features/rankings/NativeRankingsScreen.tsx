@@ -12,7 +12,7 @@
  *   • Pull-to-refresh triggers a full data re-fetch on the active tab.
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   RefreshControl,
@@ -28,6 +28,7 @@ import { useAuth } from '../auth/AuthProvider';
 import { HHS_COLORS, HHS_STYLES, HHS_TYPOGRAPHY } from '../../theme/hhsTheme';
 import { fetchTopBeers, type RankedBeer } from './rankingsService';
 import { fetchRankedMembers, type RankedMember } from './membersService';
+import { canSeeAllBeers, useBeerVisibility } from '../membership/beerVisibilityService';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -70,10 +71,19 @@ export function NativeRankingsScreen({ onOpenAuth }: NativeRankingsScreenProps) 
   const [membersLoadState, setMembersLoadState] = useState<LoadState>('idle');
   const [members, setMembers] = useState<RankedMember[]>([]);
   const [membersError, setMembersError] = useState<string | null>(null);
+  const [membersAttempted, setMembersAttempted] = useState(false);
 
   const { user } = useAuth();
+  const beerVisibility = useBeerVisibility(user?.id);
 
   const [refreshing, setRefreshing] = useState(false);
+  const visibleTopBeers = useMemo(() => {
+    if (beerVisibility.tier === 'oddballs' && !canSeeAllBeers(beerVisibility)) {
+      return topBeers.filter((item) => item.beer.day_number % 2 === 1);
+    }
+    return topBeers;
+  }, [beerVisibility, topBeers]);
+  const showOddballsTopBeersExplainer = beerVisibility.tier === 'oddballs' && !canSeeAllBeers(beerVisibility);
 
   // Load top beers on mount
   const loadTopBeers = useCallback(async () => {
@@ -108,15 +118,24 @@ export function NativeRankingsScreen({ onOpenAuth }: NativeRankingsScreenProps) 
       console.warn('[HHS Rankings] fetchRankedMembers failed:', msg);
       setMembersError(msg);
       setMembersLoadState('error');
+    } finally {
+      setMembersAttempted(true);
     }
   }, []);
 
+  useEffect(() => {
+    setMembers([]);
+    setMembersError(null);
+    setMembersLoadState('idle');
+    setMembersAttempted(false);
+  }, [user?.id]);
+
   // Auto-load members when a logged-in user switches to the Members tab
   useEffect(() => {
-    if (activeTab === 'members' && user && membersLoadState === 'idle') {
+    if (activeTab === 'members' && user?.id && !membersAttempted && membersLoadState !== 'loading') {
       void loadMembers();
     }
-  }, [activeTab, user, membersLoadState, loadMembers]);
+  }, [activeTab, user?.id, membersAttempted, membersLoadState, loadMembers]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -163,9 +182,10 @@ export function NativeRankingsScreen({ onOpenAuth }: NativeRankingsScreenProps) 
       {activeTab === 'topBeers' ? (
         <TopBeersTab
           loadState={topBeersLoadState}
-          rankings={topBeers}
+          rankings={visibleTopBeers}
           errorMessage={topBeersError}
           refreshing={refreshing}
+          showOddballsExplainer={showOddballsTopBeersExplainer}
           onRefresh={() => void onRefresh()}
         />
       ) : (
@@ -189,12 +209,14 @@ function TopBeersTab({
   rankings,
   errorMessage,
   refreshing,
+  showOddballsExplainer,
   onRefresh,
 }: {
   loadState: LoadState;
   rankings: RankedBeer[];
   errorMessage: string | null;
   refreshing: boolean;
+  showOddballsExplainer: boolean;
   onRefresh: () => void;
 }) {
   return (
@@ -228,12 +250,33 @@ function TopBeersTab({
           </Text>
         </View>
       )}
-      {loadState === 'idle' && rankings.length > 0 && (
-        <View style={styles.leaderboard}>
-          {rankings.map((item) => (
-            <BeerRankingRow key={item.beer.id} item={item} />
-          ))}
+      {loadState === 'idle' && rankings.length === 0 && showOddballsExplainer && (
+        <View style={styles.centerBox}>
+          <Text style={styles.emptyIcon}>🍺</Text>
+          <Text style={styles.emptyTitle}>No Oddballs Rankings Yet</Text>
+          <Text style={styles.emptyBody}>
+            Your default view only includes odd-day beers. Pull down to refresh, or enable “Show all 31 beers”
+            in Settings to include Full Society beers.
+          </Text>
         </View>
+      )}
+      {loadState === 'idle' && rankings.length > 0 && (
+        <>
+          {showOddballsExplainer ? (
+            <View style={styles.explainerCard}>
+              <Text style={styles.explainerTitle}>Oddballs Top Beers</Text>
+              <Text style={styles.explainerText}>
+                Showing odd-day beers only. Turn on “Show all 31 beers” in Settings to include Full Society
+                even-day beers in this list.
+              </Text>
+            </View>
+          ) : null}
+          <View style={styles.leaderboard}>
+            {rankings.map((item) => (
+              <BeerRankingRow key={item.beer.id} item={item} />
+            ))}
+          </View>
+        </>
       )}
     </ScrollView>
   );
@@ -567,6 +610,27 @@ const styles = StyleSheet.create({
   leaderboard: {
     gap: 10,
   },
+  explainerCard: {
+    backgroundColor: 'rgba(217, 124, 43, 0.10)',
+    borderColor: HHS_COLORS.border,
+    borderRadius: HHS_STYLES.cardRadius,
+    borderWidth: 1,
+    marginBottom: 12,
+    padding: 14,
+  },
+  explainerTitle: {
+    ...HHS_TYPOGRAPHY.kicker,
+    color: HHS_COLORS.gold,
+    fontSize: 11,
+    marginBottom: 6,
+    textTransform: 'uppercase',
+  },
+  explainerText: {
+    ...HHS_TYPOGRAPHY.body,
+    color: HHS_COLORS.muted,
+    fontSize: 13,
+    lineHeight: 20,
+  },
   rankRow: {
     backgroundColor: HHS_COLORS.card,
     borderColor: HHS_COLORS.border,
@@ -625,6 +689,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   starsText: {
+    ...HHS_TYPOGRAPHY.body,
     color: HHS_COLORS.muted,
     fontSize: 16,
     lineHeight: 20,

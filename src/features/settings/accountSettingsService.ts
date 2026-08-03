@@ -1,5 +1,9 @@
 import { HHS_WEB_ORIGIN } from '../../config/env';
 import { supabase } from '../../lib/supabase';
+import {
+  fetchBeerVisibilityPreference,
+  type BeerVisibilityPreference,
+} from '../membership/beerVisibilityService';
 
 export type HhsProfile = {
   id: string;
@@ -7,9 +11,11 @@ export type HhsProfile = {
   last_name: string | null;
   username: string | null;
   display_name: string | null;
+  display_name_native: string | null;
   email: string | null;
   status: string | null;
   tier: string | null;
+  beer_visibility_preference: BeerVisibilityPreference | null;
   tier_selected_at: string | null;
   venmo_clicked_at: string | null;
   native_membership_amount: number | null;
@@ -82,7 +88,7 @@ export async function fetchCurrentUserProfile(userId: string): Promise<HhsProfil
   const { data, error } = await supabase
     .from('profiles')
     .select(
-      'id, first_name, last_name, username, display_name, email, status, tier, tier_selected_at, venmo_clicked_at, native_membership_amount',
+      'id, first_name, last_name, username, display_name, display_name_native, email, status, tier, tier_selected_at, venmo_clicked_at, native_membership_amount',
     )
     .eq('id', userId)
     .maybeSingle();
@@ -91,7 +97,23 @@ export async function fetchCurrentUserProfile(userId: string): Promise<HhsProfil
     throw new Error(error.message);
   }
 
-  return (data as HhsProfile | null) ?? null;
+  const profile = (data as Omit<HhsProfile, 'beer_visibility_preference'> | null) ?? null;
+  if (!profile) return null;
+
+  let preference: BeerVisibilityPreference | null = null;
+  try {
+    const result = await fetchBeerVisibilityPreference(userId);
+    preference = result.preference;
+  } catch (err) {
+    console.warn(
+      '[HHS settings] beer visibility preference unavailable; using safe default:',
+      err instanceof Error ? err.message : err,
+    );
+  }
+  return {
+    ...profile,
+    beer_visibility_preference: preference,
+  };
 }
 
 export async function fetchNotificationPreferences(userId: string): Promise<NotificationPreferences> {

@@ -876,6 +876,7 @@ const styles = StyleSheet.create({
     width: 28,
   },
   previewRemoveText: {
+    ...HHS_TYPOGRAPHY.body,
     color: '#fff',
     fontSize: 12,
     fontWeight: '700',
@@ -1058,6 +1059,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   postTimestamp: {
+    ...HHS_TYPOGRAPHY.body,
     color: HHS_COLORS.muted,
     fontSize: 12,
     marginLeft: 6,
@@ -1068,6 +1070,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   deleteButtonText: {
+    ...HHS_TYPOGRAPHY.body,
     color: HHS_COLORS.muted,
     fontSize: 13,
     opacity: 0.75,
@@ -1159,6 +1162,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   commentTimestamp: {
+    ...HHS_TYPOGRAPHY.body,
     color: HHS_COLORS.muted,
     fontSize: 11,
   },
@@ -1256,6 +1260,7 @@ const styles = StyleSheet.create({
     width: 36,
   },
   lightboxCloseText: {
+    ...HHS_TYPOGRAPHY.body,
     color: '#fff',
     fontSize: 16,
     fontWeight: '700',

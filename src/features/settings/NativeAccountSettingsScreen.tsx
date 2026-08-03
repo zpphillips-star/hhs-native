@@ -529,15 +529,32 @@ export function NativeAccountSettingsScreen({
       );
     }
 
+    if (normalizedTier === 'unknown') {
+      return (
+        <View style={styles.card}>
+          <Text style={styles.sectionKicker}>Beer Visibility</Text>
+          <Text style={styles.cardTitle}>Show All 31 Beers</Text>
+          <Text style={styles.bodyText}>
+            This setting controls whether you see only the beers for your membership tier or the full 31-beer
+            lineup.{'\n\n'}
+            Oddballs members (16 beers, odd-numbered days) can turn on &quot;Show all 31 beers&quot; to peek at
+            revealed Full Society beers — even-day entries stay read-only.{'\n\n'}
+            Your membership tier is not yet set in your profile. Contact HHS or check your membership
+            confirmation to get your tier configured.
+          </Text>
+        </View>
+      );
+    }
+
     if (normalizedTier !== 'oddballs') return null;
 
     return (
       <View style={styles.card}>
         <Text style={styles.sectionKicker}>Beer Visibility</Text>
-        <Text style={styles.cardTitle}>Oddballs Calendar</Text>
+        <Text style={styles.cardTitle}>Show All 31 Beers</Text>
         <Text style={styles.bodyText}>
-          Oddballs participate in odd-numbered beer days. Turn this on to peek at all revealed beers while keeping
-          even days marked as Full Society / not participating.
+          Oddballs participate in odd-numbered beer days (days 1, 3, 5 … 31). Turn this on to see all
+          revealed Full Society beers too — even-day entries stay read-only: no rating and no Wall post.
         </Text>
         {beerVisibilityError ? <Text style={styles.errorText}>{beerVisibilityError}</Text> : null}
         <PreferenceRow

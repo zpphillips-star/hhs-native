@@ -27,6 +27,11 @@ import {
   upsertUserBeerRating,
 } from './beerService';
 import type { Beer, BeerRating, BeerRatingSummary } from './types';
+import {
+  canSeeAllBeers,
+  isParticipatingBeerDay,
+  useBeerVisibility,
+} from '../membership/beerVisibilityService';
 
 const COLORS = HHS_COLORS;
 
@@ -111,6 +116,7 @@ function getCalendarState(now: Date) {
 
 export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
   const { user } = useAuth();
+  const beerVisibility = useBeerVisibility(user?.id);
   const [beers, setBeers] = useState<Beer[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -140,6 +146,7 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
   const [todayWallPostText, setTodayWallPostText] = useState('');
   const [todayWallPosting, setTodayWallPosting] = useState(false);
   const [todayWallPosted, setTodayWallPosted] = useState(false);
+  const [todayPeekEnabled, setTodayPeekEnabled] = useState(false);
 
   const now = useMemo(() => getEffectiveNow(), []);
   const calendarState = useMemo(() => getCalendarState(now), [now]);
@@ -152,6 +159,12 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
   }, [beers]);
 
   const todayBeer = todayDay ? beerMap.get(todayDay) ?? null : null;
+  const canShowAllForOddballs = canSeeAllBeers(beerVisibility);
+  const todayParticipates = isParticipatingBeerDay(beerVisibility.tier, todayBeer?.day_number);
+  const todayIsOddballsFullSocietyBeer = Boolean(todayBeer && beerVisibility.tier === 'oddballs' && !todayParticipates);
+  const todayPeekMode = Boolean(todayIsOddballsFullSocietyBeer && (todayPeekEnabled || canShowAllForOddballs));
+  const selectedParticipates = isParticipatingBeerDay(beerVisibility.tier, selectedBeer?.day_number);
+  const selectedIsFullSocietyPeek = Boolean(selectedBeer && beerVisibility.tier === 'oddballs' && !selectedParticipates);
 
   const loadSelectedRating = useCallback(async (beer: Beer | null, userId: string | undefined) => {
     setSelectedRating(null);
@@ -199,14 +212,18 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
   }, [loadBeers]);
 
   useEffect(() => {
-    void loadSelectedRating(selectedBeer, user?.id);
-  }, [loadSelectedRating, selectedBeer, user?.id]);
+    void loadSelectedRating(selectedParticipates ? selectedBeer : null, user?.id);
+  }, [loadSelectedRating, selectedBeer, selectedParticipates, user?.id]);
+
+  useEffect(() => {
+    setTodayPeekEnabled(false);
+  }, [todayBeer?.id, beerVisibility.effectivePreference, beerVisibility.tier]);
 
   useEffect(() => {
     setTodayRating(null);
     setTodayRatingError(null);
 
-    if (mode !== 'yourBeer' || !todayBeer || !user?.id) {
+    if (mode !== 'yourBeer' || !todayBeer || !user?.id || !todayParticipates) {
       setTodayRatingLoading(false);
       return;
     }
@@ -232,7 +249,7 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
     return () => {
       cancelled = true;
     };
-  }, [mode, todayBeer, user?.id]);
+  }, [mode, todayBeer, todayParticipates, user?.id]);
 
   useEffect(() => {
     setTodayRatingSummary({ average: null, count: 0 });
@@ -317,7 +334,7 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
   };
 
   const handleRateSelectedBeer = async (stars: number) => {
-    if (!user || !selectedBeer || ratingSaving) return;
+    if (!user || !selectedBeer || ratingSaving || !selectedParticipates) return;
 
     setRatingSaving(true);
     setRatingError(null);
@@ -339,7 +356,7 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
   };
 
   const handleRateTodayBeer = async (stars: number) => {
-    if (!user || !todayBeer || todayRatingSaving) return;
+    if (!user || !todayBeer || todayRatingSaving || !todayParticipates) return;
 
     setTodayRatingSaving(true);
     setTodayRatingError(null);
@@ -361,7 +378,7 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
   };
 
   const handleSelectedWallPost = async () => {
-    if (!user || !selectedBeer || selectedWallPosting) return;
+    if (!user || !selectedBeer || selectedWallPosting || !selectedParticipates) return;
     const trimmed = selectedWallPostText.trim();
     if (!trimmed) {
       setSelectedWallError('Write a Wall post before publishing.');
@@ -384,7 +401,7 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
   };
 
   const handleTodayWallPost = async () => {
-    if (!user || !todayBeer || todayWallPosting) return;
+    if (!user || !todayBeer || todayWallPosting || !todayParticipates) return;
     const trimmed = todayWallPostText.trim();
     if (!trimmed) {
       setTodayWallError('Write a Wall post before publishing.');
@@ -502,6 +519,29 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
       count: todayRatingSummary.count,
       loading: todayRatingSummaryLoading,
     });
+
+  const renderReadOnlyParticipationCard = (context: 'rating' | 'wall') => (
+    <View style={styles.ratingCard}>
+      <Text style={styles.factLabel}>{context === 'rating' ? 'Rating Disabled' : 'Wall Posting Disabled'}</Text>
+      <Text style={styles.ratingHelpText}>
+        This is a Full Society even-day beer. Oddballs can peek, but it does not count as a participating beer,
+        so beer-specific {context === 'rating' ? 'ratings' : 'Wall posts'} are disabled.
+      </Text>
+    </View>
+  );
+
+  const renderOddballsInfoBanner = (variant: 'participating' | 'peek') => (
+    <View style={variant === 'peek' ? styles.fullSocietyBanner : styles.oddballsBanner}>
+      <Text style={styles.bannerTitle}>
+        {variant === 'peek' ? 'Full Society beer · peek mode' : 'Oddballs participating beer'}
+      </Text>
+      <Text style={styles.bannerText}>
+        {variant === 'peek'
+          ? 'You can read what Hallowed members are drinking today. Rating and beer-specific Wall posting stay off for this even-day beer.'
+          : 'This odd-numbered beer is part of your Oddballs lineup — rating and beer-specific Wall posting are available.'}
+      </Text>
+    </View>
+  );
 
   const renderSelectedWallPanel = (beer: Beer) => {
     const canPublish = Boolean(user && selectedWallPostText.trim() && !selectedWallPosting);
@@ -676,6 +716,28 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
       );
     }
 
+    if (todayIsOddballsFullSocietyBeer && !todayPeekMode) {
+      return (
+        <View style={styles.todaySection}>
+          <View style={styles.messageCard}>
+            <Text style={styles.kicker}>Oddballs Day</Text>
+            <Text style={styles.cardHeadline}>No designated Oddballs beer today</Text>
+            <Text style={styles.messageText}>
+              Day {todayBeer.day_number} is an even-numbered Full Society beer. Oddballs drink the odd days, so
+              rating and beer-specific Wall posting are paused today.
+            </Text>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => setTodayPeekEnabled(true)}
+              style={styles.peekButton}
+            >
+              <Text style={styles.peekButtonText}>See what Hallowed members are drinking</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      );
+    }
+
     const meta = formatBeerMeta(todayBeer);
     return (
       <View style={styles.todaySection}>
@@ -689,6 +751,11 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
         <Text style={styles.beerTitle}>{todayBeer.name}</Text>
         <Text style={styles.breweryTitle}>{todayBeer.brewery}</Text>
         {meta ? <Text style={styles.metaText}>{meta}</Text> : null}
+        {todayIsOddballsFullSocietyBeer
+          ? renderOddballsInfoBanner('peek')
+          : beerVisibility.tier === 'oddballs'
+            ? renderOddballsInfoBanner('participating')
+            : null}
         {todayBeer.description ? (
           <Text style={styles.descriptionText}>{todayBeer.description}</Text>
         ) : (
@@ -719,14 +786,16 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
           </View>
         )}
         {renderSocietyRatingPanel()}
-        {renderRatingPanel({
-          errorMessage: todayRatingError,
-          loadingRating: todayRatingLoading,
-          onRate: (stars) => void handleRateTodayBeer(stars),
-          rating: todayRating,
-          savingRating: todayRatingSaving,
-        })}
-        {renderTodayWallPanel(todayBeer)}
+        {todayParticipates
+          ? renderRatingPanel({
+              errorMessage: todayRatingError,
+              loadingRating: todayRatingLoading,
+              onRate: (stars) => void handleRateTodayBeer(stars),
+              rating: todayRating,
+              savingRating: todayRatingSaving,
+            })
+          : renderReadOnlyParticipationCard('rating')}
+        {todayParticipates ? renderTodayWallPanel(todayBeer) : renderReadOnlyParticipationCard('wall')}
       </View>
     );
   };
@@ -748,6 +817,12 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
           const isToday = day === todayDay;
           const isPast = revealedThroughDay ? day < revealedThroughDay : false;
           const shouldReveal = Boolean(beer && revealedThroughDay && day <= revealedThroughDay);
+          const participates = isParticipatingBeerDay(beerVisibility.tier, day);
+          const isOddballsLockedEvenDay =
+            Boolean(beer && shouldReveal && beerVisibility.tier === 'oddballs' && !participates && !canShowAllForOddballs);
+          const isOddballsFullSocietyVisible =
+            Boolean(beer && shouldReveal && beerVisibility.tier === 'oddballs' && !participates && canShowAllForOddballs);
+          const shouldShowBeerIdentity = shouldReveal && !isOddballsLockedEvenDay;
           // Today's beer is also tappable — opens the same detail/rating modal as past days
           const canOpenDetail = Boolean(beer && revealedThroughDay && day <= revealedThroughDay);
           const isLast = day === 31;
@@ -760,6 +835,7 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
                 !isLast && styles.listItemSeparator,
                 isToday && styles.todayListItem,
                 isPast && !isToday && styles.pastListItem,
+                (isOddballsLockedEvenDay || isOddballsFullSocietyVisible) && styles.lockedListItem,
               ]}
               onPress={() => {
                 if (canOpenDetail && beer) openBeerDetail(beer);
@@ -769,10 +845,18 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
             >
               <Text style={[styles.dayNumber, isToday && styles.todayText]}>{day}</Text>
               <View style={styles.listText}>
-                {shouldReveal && beer ? (
+                {shouldShowBeerIdentity && beer ? (
                   <>
                     <Text style={styles.listBeerName} numberOfLines={1}>{beer.name}</Text>
-                    <Text style={styles.listBrewery} numberOfLines={1}>{beer.brewery}</Text>
+                    <Text style={styles.listBrewery} numberOfLines={1}>
+                      {beer.brewery}
+                      {isOddballsFullSocietyVisible ? ' · Full Society / not participating' : ''}
+                    </Text>
+                  </>
+                ) : isOddballsLockedEvenDay ? (
+                  <>
+                    <Text style={styles.unrevealedText}>Full Society beer · tap to peek</Text>
+                    <Text style={styles.listBrewery} numberOfLines={1}>Even-day beer hidden for Oddballs</Text>
                   </>
                 ) : (
                   <Text style={styles.unrevealedText}>To be revealed...</Text>
@@ -824,6 +908,7 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
               <Text style={styles.modalBeerTitle}>{selectedBeer.name}</Text>
               <Text style={styles.modalBreweryTitle}>{selectedBeer.brewery}</Text>
               {meta ? <Text style={styles.modalMetaText}>{meta}</Text> : null}
+              {selectedIsFullSocietyPeek ? renderOddballsInfoBanner('peek') : null}
               {selectedBeer.description ? (
                 <Text style={styles.modalDescriptionText}>{selectedBeer.description}</Text>
               ) : (
@@ -864,14 +949,20 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
                 loading: selectedRatingSummaryLoading,
               })}
 
-              {renderRatingPanel({
-                errorMessage: ratingError,
-                loadingRating: ratingLoading,
-                onRate: (stars) => void handleRateSelectedBeer(stars),
-                rating: selectedRating,
-                savingRating: ratingSaving,
-              })}
-              {!isPastDay ? renderSelectedWallPanel(selectedBeer) : null}
+              {selectedParticipates
+                ? renderRatingPanel({
+                    errorMessage: ratingError,
+                    loadingRating: ratingLoading,
+                    onRate: (stars) => void handleRateSelectedBeer(stars),
+                    rating: selectedRating,
+                    savingRating: ratingSaving,
+                  })
+                : renderReadOnlyParticipationCard('rating')}
+              {!isPastDay
+                ? selectedParticipates
+                  ? renderSelectedWallPanel(selectedBeer)
+                  : renderReadOnlyParticipationCard('wall')
+                : null}
             </ScrollView>
             </KeyboardAvoidingView>
           </View>
@@ -1101,6 +1192,31 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     textAlign: 'center',
   },
+  cardHeadline: {
+    ...HHS_TYPOGRAPHY.display,
+    color: COLORS.text,
+    fontSize: 22,
+    fontWeight: '700',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  peekButton: {
+    alignItems: 'center',
+    backgroundColor: COLORS.gold,
+    borderRadius: HHS_STYLES.buttonRadius,
+    marginTop: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  peekButtonText: {
+    ...HHS_TYPOGRAPHY.button,
+    color: COLORS.background,
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    textAlign: 'center',
+    textTransform: 'uppercase',
+  },
   heroCard: {
     alignItems: 'center',
     backgroundColor: COLORS.card,
@@ -1232,6 +1348,36 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.border,
     height: 1,
   },
+  oddballsBanner: {
+    backgroundColor: 'rgba(217, 124, 43, 0.10)',
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 16,
+    padding: 13,
+  },
+  fullSocietyBanner: {
+    backgroundColor: COLORS.cardAlt,
+    borderColor: COLORS.borderStrong,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 16,
+    padding: 13,
+  },
+  bannerTitle: {
+    ...HHS_TYPOGRAPHY.kicker,
+    color: COLORS.gold,
+    fontSize: 11,
+    letterSpacing: 1.6,
+    marginBottom: 6,
+    textTransform: 'uppercase',
+  },
+  bannerText: {
+    ...HHS_TYPOGRAPHY.body,
+    color: COLORS.muted,
+    fontSize: 13,
+    lineHeight: 20,
+  },
   calendarHeader: {
     alignItems: 'center',
     borderTopColor: COLORS.border,
@@ -1277,6 +1423,10 @@ const styles = StyleSheet.create({
   },
   pastListItem: {
     opacity: 0.78,
+  },
+  lockedListItem: {
+    backgroundColor: 'rgba(255, 255, 255, 0.025)',
+    opacity: 0.7,
   },
   dayNumber: {
     ...HHS_TYPOGRAPHY.display,
