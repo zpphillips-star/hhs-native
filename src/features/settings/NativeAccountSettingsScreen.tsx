@@ -2,6 +2,7 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -136,6 +137,7 @@ export function NativeAccountSettingsScreen({
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
+  const [countdown, setCountdown] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
 
   const displayName = useMemo(() => getDisplayName(profile, user?.email), [profile, user?.email]);
   const normalizedTier = useMemo(() => normalizeMembershipTier(profile?.tier), [profile?.tier]);
@@ -195,6 +197,26 @@ export function NativeAccountSettingsScreen({
   useEffect(() => {
     void loadAccountDetails();
   }, [loadAccountDetails]);
+
+  useEffect(() => {
+    if (mode !== 'about') return undefined;
+    const tick = () => {
+      const now = new Date();
+      if (now.getMonth() === 9) return; // October — no countdown needed
+      const oct1 = new Date(now.getFullYear(), 9, 1);
+      if (now > oct1) oct1.setFullYear(oct1.getFullYear() + 1);
+      const diff = oct1.getTime() - now.getTime();
+      setCountdown({
+        days: Math.floor(diff / 86400000),
+        hours: Math.floor((diff % 86400000) / 3600000),
+        minutes: Math.floor((diff % 3600000) / 60000),
+        seconds: Math.floor((diff % 60000) / 1000),
+      });
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [mode]);
 
   const handleRegisterPush = useCallback(async () => {
     if (!user?.id || registeringPush) return;
@@ -292,9 +314,7 @@ export function NativeAccountSettingsScreen({
     if (user?.id) {
       const cleanup = await unregisterCachedPushToken({ id: user.id, email: profile?.email ?? user.email });
       if (!cleanup.ok) {
-        setDetailsError(`Push token cleanup failed: ${cleanup.message}`);
-        setSigningOut(false);
-        return;
+        console.warn('[HHS sign-out] Push token cleanup failed (non-fatal):', cleanup.message);
       }
     }
     const result = await signOut();
@@ -462,7 +482,7 @@ export function NativeAccountSettingsScreen({
         disabled={Boolean(prefSavingKey)}
         enabled={prefs.daily_beer}
         label="Daily Beer"
-        description="Daily October beer reminders."
+        description="Daily 4 PM reminder when your beer of the day drops."
         onValueChange={(value) => void handlePreferenceChange('daily_beer', value)}
       />
       <PreferenceRow
@@ -533,7 +553,7 @@ export function NativeAccountSettingsScreen({
       return (
         <View style={styles.card}>
           <Text style={styles.sectionKicker}>Beer Visibility</Text>
-          <Text style={styles.cardTitle}>Show All 31 Beers</Text>
+          <Text style={styles.cardTitle}>Membership Tier Not Set</Text>
           <Text style={styles.bodyText}>
             This setting controls whether you see only the beers for your membership tier or the full 31-beer
             lineup.{'\n\n'}
@@ -588,27 +608,77 @@ export function NativeAccountSettingsScreen({
     </>
   );
 
-  const renderAboutHhs = () => (
-    <View style={styles.card}>
-      <Text style={styles.sectionKicker}>About HHS</Text>
-      <Text style={styles.cardTitle}>The Society of the Sip</Text>
-      <Text style={styles.bodyText}>
-        The Hallowed Hop Society is an annual gathering of beer enthusiasts who embark on a solemn
-        (and slightly ridiculous) ritual: 31 unique beers in 31 haunted days.
-      </Text>
-      <Text style={styles.bodyText}>
-        Each year brings a new theme, a new lineup, and new initiates brave enough to take the oath.
-        We drink not just for the flavor — but for the fellowship.
-      </Text>
-      <Text style={styles.quoteText}>Through ritual we pour, through hops we unite.</Text>
-      <View style={styles.joinBox}>
-        <Text style={styles.joinTitle}>Want to join the Society?</Text>
-        <TouchableOpacity activeOpacity={0.85} onPress={onOpenAuth} style={styles.primaryButton}>
-          <Text style={styles.primaryButtonText}>{user ? 'View Membership' : 'I Want In'}</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+  const renderAboutHhs = () => {
+    const isOctober = new Date().getMonth() === 9;
+    return (
+      <>
+        {/* Hero heading card */}
+        <View style={styles.card}>
+          <Text style={styles.aboutDisplayTitle}>HALLOWED{'\n'}HOP SOCIETY</Text>
+        </View>
+
+        {/* Hero image */}
+        <View style={styles.aboutImageCard}>
+          <Image
+            source={require('../../../assets/mughhs.webp')}
+            style={styles.aboutHeroImage}
+            resizeMode="cover"
+          />
+        </View>
+
+        {/* Main copy */}
+        <View style={styles.card}>
+          <Text style={styles.bodyText}>
+            As October's chill creeps in and shadows grow long, a devoted fellowship rises to honor the sacred tradition of the hop.
+          </Text>
+          <Text style={styles.bodyText}>
+            <Text style={styles.aboutBodyStrong}>The Hallowed Hop Society</Text>
+            {' is an annual gathering of beer enthusiasts who embark on a solemn (and slightly ridiculous) ritual: '}
+            <Text style={styles.aboutBodyEmphasis}>31 unique beers in 31 haunted days.</Text>
+            {' No repeats. No excuses. Just pure, unfiltered reverence for the craft of brewing.'}
+          </Text>
+          <Text style={styles.bodyText}>
+            Each year brings a new theme, a new lineup of brews, and new initiates brave enough to take the oath. From spiced pumpkin ales to bone-chilling stouts, we drink not just for the flavor—but for the fellowship.
+          </Text>
+          <Text style={styles.quoteText}>Through ritual we pour, through hops we unite.</Text>
+          <Text style={styles.bodyText}>
+            We are a society of the sip, the story, and the sacred pour.
+          </Text>
+          <Text style={styles.bodyText}>
+            If you've got a taste for adventure (and good beer), your place at the circle awaits.
+          </Text>
+        </View>
+
+        {/* Countdown to October (only shown pre-October) */}
+        {!isOctober ? (
+          <View style={styles.card}>
+            <Text style={styles.sectionKicker}>The ritual begins in</Text>
+            <View style={styles.aboutCountdownRow}>
+              {[
+                { val: countdown.days, label: 'Days' },
+                { val: countdown.hours, label: 'Hours' },
+                { val: countdown.minutes, label: 'Min' },
+                { val: countdown.seconds, label: 'Sec' },
+              ].map(({ val, label }) => (
+                <View key={label} style={styles.aboutCountdownUnit}>
+                  <Text style={styles.aboutCountdownNum}>{String(val).padStart(2, '0')}</Text>
+                  <Text style={styles.aboutCountdownLabel}>{label}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : null}
+
+        {/* Join CTA */}
+        <View style={[styles.card, styles.aboutCtaCard]}>
+          <Text style={styles.joinTitle}>WANT TO JOIN{'\n'}THE SOCIETY?</Text>
+          <TouchableOpacity activeOpacity={0.85} onPress={onOpenAuth} style={styles.primaryButton}>
+            <Text style={styles.primaryButtonText}>{user ? 'View Membership' : 'I Want In'}</Text>
+          </TouchableOpacity>
+        </View>
+      </>
+    );
+  };
 
   const renderSignInRequired = () => (
     <View style={styles.card}>
@@ -627,7 +697,6 @@ export function NativeAccountSettingsScreen({
     <>
       {user ? (
         <>
-          {renderAccountSummary()}
           {renderBeerVisibilitySettings()}
           {renderNotificationSettings()}
         </>
@@ -804,21 +873,6 @@ const styles = StyleSheet.create({
     fontSize: 34,
     fontWeight: '700',
   },
-  webFallbackButton: {
-    borderColor: COLORS.borderStrong,
-    borderRadius: HHS_STYLES.pillRadius,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  webFallbackText: {
-    ...HHS_TYPOGRAPHY.button,
-    color: COLORS.gold,
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-  },
   loadingCard: {
     alignItems: 'center',
     backgroundColor: COLORS.card,
@@ -974,9 +1028,11 @@ const styles = StyleSheet.create({
   joinTitle: {
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '700',
+    letterSpacing: 1.8,
     textAlign: 'center',
+    textTransform: 'uppercase',
   },
   primaryButton: {
     alignItems: 'center',
@@ -1008,17 +1064,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 1.4,
     textTransform: 'uppercase',
-  },
-  textButton: {
-    alignSelf: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  textButtonText: {
-    ...HHS_TYPOGRAPHY.body,
-    color: COLORS.muted,
-    fontSize: 13,
-    fontWeight: '700',
   },
   buttonDisabled: {
     opacity: 0.55,
@@ -1084,38 +1129,72 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
-  readOnlyPill: {
-    borderRadius: HHS_STYLES.pillRadius,
-    borderWidth: 1,
-    minWidth: 48,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  readOnlyPillOn: {
-    backgroundColor: 'rgba(217, 124, 43, 0.12)',
-    borderColor: COLORS.borderStrong,
-  },
-  readOnlyPillOff: {
-    backgroundColor: 'rgba(166, 157, 141, 0.08)',
-    borderColor: 'rgba(166, 157, 141, 0.25)',
-  },
-  readOnlyPillText: {
-    ...HHS_TYPOGRAPHY.button,
-    fontSize: 12,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  readOnlyPillTextOn: {
-    color: COLORS.gold,
-  },
-  readOnlyPillTextOff: {
-    color: COLORS.muted,
-  },
   footerNote: {
     ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 12,
     opacity: 0.6,
     textAlign: 'center',
+  },
+  // --- About HHS page styles ---
+  aboutDisplayTitle: {
+    ...HHS_TYPOGRAPHY.display,
+    color: COLORS.text,
+    fontSize: 42,
+    fontWeight: '900',
+    letterSpacing: 1,
+    lineHeight: 46,
+    marginTop: 6,
+  },
+  aboutImageCard: {
+    borderColor: COLORS.border,
+    borderRadius: HHS_STYLES.cardRadius,
+    borderWidth: 1,
+    marginBottom: 16,
+    overflow: 'hidden',
+  },
+  aboutHeroImage: {
+    height: 220,
+    width: '100%',
+  },
+  aboutBodyEmphasis: {
+    color: COLORS.gold,
+    fontStyle: 'italic',
+    fontWeight: '700',
+  },
+  aboutCountdownRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 6,
+  },
+  aboutCountdownUnit: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  aboutCountdownNum: {
+    ...HHS_TYPOGRAPHY.display,
+    color: COLORS.gold,
+    fontSize: 34,
+    fontWeight: '700',
+    lineHeight: 38,
+  },
+  aboutCountdownLabel: {
+    ...HHS_TYPOGRAPHY.kicker,
+    color: COLORS.muted,
+    fontSize: 10,
+    letterSpacing: 1.4,
+    marginTop: 4,
+    textTransform: 'uppercase',
+  },
+  aboutCtaCard: {
+    alignItems: 'center',
+    borderTopColor: COLORS.gold,
+    borderTopWidth: 2,
+    gap: 14,
+    paddingTop: 22,
+  },
+  aboutBodyStrong: {
+    color: COLORS.text,
+    fontWeight: '700',
   },
 });

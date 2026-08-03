@@ -6,6 +6,7 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import { HHS_WEB_ORIGIN, USE_NATIVE_BEER_SCREEN } from '../config/env';
 import { AuthProvider } from '../features/auth/AuthProvider';
 import { NativeBeerScreen } from '../features/beers/NativeBeerScreen';
+import { NativeFeedbackScreen } from '../features/feedback/NativeFeedbackScreen';
 import { NativeRankingsScreen } from '../features/rankings/NativeRankingsScreen';
 import { NativeAccountSettingsScreen } from '../features/settings/NativeAccountSettingsScreen';
 import { NativeWallBeerContext, NativeWallScreen } from '../features/wall/NativeWallScreen';
@@ -154,7 +155,7 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
           ) : contentMode === 'aboutHhs' ? (
             <NativeAccountSettingsScreen mode="about" onBack={returnToYourBeer} onOpenAuth={openAuth} />
           ) : contentMode === 'feedback' ? (
-            <NativeAccountSettingsScreen mode="feedback" onBack={returnToYourBeer} onOpenAuth={openAuth} />
+            <NativeFeedbackScreen onBack={returnToYourBeer} />
           ) : contentMode === 'settingsPage' ? (
             <NativeAccountSettingsScreen mode="settings" onBack={returnToYourBeer} onOpenAuth={openAuth} />
           ) : (
