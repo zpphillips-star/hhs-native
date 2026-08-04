@@ -844,11 +844,14 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
           const isPast = revealedThroughDay ? day < revealedThroughDay : false;
           const shouldReveal = Boolean(beer && revealedThroughDay && day <= revealedThroughDay);
           const participates = isParticipatingBeerDay(beerVisibility.tier, day);
+          const visibleInSelectedCalendar = beerVisibility.effectivePreference === 'all' || day % 2 === 1;
           const isOddballsLockedEvenDay =
             Boolean(beer && shouldReveal && beerVisibility.tier === 'oddballs' && !participates && !canShowAllForOddballs);
           const isOddballsFullSocietyVisible =
             Boolean(beer && shouldReveal && beerVisibility.tier === 'oddballs' && !participates && canShowAllForOddballs);
-          const shouldShowBeerIdentity = shouldReveal && !isOddballsLockedEvenDay;
+          const isHiddenByOddballsCalendarView =
+            Boolean(beer && shouldReveal && !visibleInSelectedCalendar && beerVisibility.tier !== 'oddballs');
+          const shouldShowBeerIdentity = shouldReveal && !isOddballsLockedEvenDay && !isHiddenByOddballsCalendarView;
           // Today's beer is also tappable — opens the same detail/rating modal as past days
           const canOpenDetail = Boolean(beer && revealedThroughDay && day <= revealedThroughDay);
           const isLast = day === 31;
@@ -861,7 +864,7 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
                 !isLast && styles.listItemSeparator,
                 isToday && styles.todayListItem,
                 isPast && !isToday && styles.pastListItem,
-                (isOddballsLockedEvenDay || isOddballsFullSocietyVisible) && styles.lockedListItem,
+                (isOddballsLockedEvenDay || isOddballsFullSocietyVisible || isHiddenByOddballsCalendarView) && styles.lockedListItem,
               ]}
               onPress={() => {
                 if (canOpenDetail && beer) openBeerDetail(beer);

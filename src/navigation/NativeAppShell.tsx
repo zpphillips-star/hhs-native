@@ -202,15 +202,11 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
                     <Image source={HHS_LOGO} style={styles.menuLogoImage} resizeMode="contain" />
                   </View>
                   <Text style={styles.menuKicker}>Hallowed Hop Society</Text>
-                  <Text style={styles.menuTitle}>The Settings</Text>
+                  <Text style={styles.menuTitle}>Membership and Notifications</Text>
                   <Text style={styles.menuBody}>Choose a Society action.</Text>
 
-                  <TouchableOpacity style={styles.menuItem} onPress={openAuth} activeOpacity={0.78}>
-                    <Text style={styles.menuItemText}>Sign in / out</Text>
-                    <Text style={styles.menuChevron}>›</Text>
-                  </TouchableOpacity>
                   <TouchableOpacity style={styles.menuItem} onPress={openSettingsInfo} activeOpacity={0.78}>
-                    <Text style={styles.menuItemText}>Settings</Text>
+                    <Text style={styles.menuItemText}>Membership and Notifications</Text>
                     <Text style={styles.menuChevron}>›</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.menuItem} onPress={openAboutHhs} activeOpacity={0.78}>
@@ -219,6 +215,10 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.menuItem} onPress={openFeedback} activeOpacity={0.78}>
                     <Text style={styles.menuItemText}>Feedback</Text>
+                    <Text style={styles.menuChevron}>›</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.menuItem} onPress={openAuth} activeOpacity={0.78}>
+                    <Text style={styles.menuItemText}>Sign in / out</Text>
                     <Text style={styles.menuChevron}>›</Text>
                   </TouchableOpacity>
 

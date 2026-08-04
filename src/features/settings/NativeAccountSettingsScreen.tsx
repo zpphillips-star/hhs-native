@@ -103,10 +103,10 @@ function PreferenceRow({ label, description, enabled, indented, disabled, onValu
 }
 
 function getHeaderTitle(mode: NativeSettingsMode) {
-  if (mode === 'auth') return 'Sign In';
+  if (mode === 'auth') return 'Sign in / out';
   if (mode === 'about') return 'About HHS';
   if (mode === 'feedback') return 'Feedback';
-  return 'The Settings';
+  return 'Membership and Notifications';
 }
 
 export function NativeAccountSettingsScreen({
@@ -264,7 +264,7 @@ export function NativeAccountSettingsScreen({
 
   const handleBeerVisibilityChange = useCallback(
     async (showAll: boolean) => {
-      if (!user?.id || beerVisibilitySaving || normalizedTier !== 'oddballs') return;
+      if (!user?.id || beerVisibilitySaving || normalizedTier === 'unknown' || normalizedTier === 'logged_out') return;
 
       const previousProfile = profile;
       const nextPreference: BeerVisibilityPreference = showAll ? 'all' : 'participating_only';
@@ -536,25 +536,13 @@ export function NativeAccountSettingsScreen({
       normalizedTier,
       profile.beer_visibility_preference ?? null,
     );
-
-    if (normalizedTier === 'hallowed') {
-      return (
-        <View style={styles.card}>
-          <Text style={styles.sectionKicker}>Beer Visibility</Text>
-          <Text style={styles.cardTitle}>Full Calendar Included</Text>
-          <Text style={styles.bodyText}>
-            Your Hallowed membership includes all 31 beers. The Calendar, Your Beer, and Top Beers show the full
-            revealed lineup.
-          </Text>
-        </View>
-      );
-    }
+    const showingHallowedCalendar = effectivePreference === 'all';
 
     if (normalizedTier === 'unknown') {
       return (
         <View style={styles.card}>
-          <Text style={styles.sectionKicker}>Beer Visibility</Text>
-          <Text style={styles.cardTitle}>Membership Tier Not Set</Text>
+          <Text style={styles.sectionKicker}>Membership</Text>
+          <Text style={styles.cardTitle}>Beer Calendar Visibility</Text>
           <Text style={styles.bodyText}>
             This setting controls whether you see only the beers for your membership tier or the full 31-beer
             lineup.{'\n\n'}
@@ -567,22 +555,28 @@ export function NativeAccountSettingsScreen({
       );
     }
 
-    if (normalizedTier !== 'oddballs') return null;
-
     return (
       <View style={styles.card}>
-        <Text style={styles.sectionKicker}>Beer Visibility</Text>
-        <Text style={styles.cardTitle}>Show All 31 Beers</Text>
+        <Text style={styles.sectionKicker}>Membership</Text>
+        <Text style={styles.cardTitle}>Beer Calendar Visibility</Text>
         <Text style={styles.bodyText}>
-          Oddballs participate in odd-numbered beer days (days 1, 3, 5 … 31). Turn this on to see all
-          revealed Full Society beers too — even-day entries stay read-only: no rating and no Wall post.
+          Your membership: {formatTier(profile?.tier)}.{'\n\n'}
+          Choose which beer calendar list you want to see. Hallowed shows all 31 beers; Oddballs shows the
+          16 odd-numbered beer days.
+          {normalizedTier === 'oddballs'
+            ? ' If you view the Hallowed list, even-day beers stay view-only: no rating and no beer-specific Wall post.'
+            : ' This changes calendar visibility only; your actual membership stays unchanged.'}
         </Text>
         {beerVisibilityError ? <Text style={styles.errorText}>{beerVisibilityError}</Text> : null}
         <PreferenceRow
           disabled={beerVisibilitySaving}
-          enabled={effectivePreference === 'all'}
-          label="Show all 31 beers"
-          description="Even-day beers stay read-only: no rating and no beer-specific Wall post."
+          enabled={showingHallowedCalendar}
+          label="Hallowed calendar"
+          description={
+            showingHallowedCalendar
+              ? 'Showing the full 31-beer calendar.'
+              : 'Showing the Oddballs 16-beer calendar.'
+          }
           onValueChange={(value) => void handleBeerVisibilityChange(value)}
         />
         {beerVisibilitySaving ? <Text style={styles.settingsSavingText}>Saving beer visibility…</Text> : null}
@@ -591,22 +585,19 @@ export function NativeAccountSettingsScreen({
   };
 
   const renderSignOutPage = () => (
-    <>
-      {renderAccountSummary()}
-      <View style={styles.card}>
-        <Text style={styles.sectionKicker}>Session</Text>
-        <Text style={styles.cardTitle}>Signed in</Text>
-        <Text style={styles.bodyText}>You are signed in via Supabase native session storage.</Text>
-        <TouchableOpacity
-          activeOpacity={0.85}
-          disabled={signingOut}
-          onPress={() => void handleSignOut()}
-          style={[styles.secondaryButton, signingOut && styles.buttonDisabled]}
-        >
-          <Text style={styles.secondaryButtonText}>{signingOut ? 'Signing out...' : 'Sign Out'}</Text>
-        </TouchableOpacity>
-      </View>
-    </>
+    <View style={styles.card}>
+      <Text style={styles.sectionKicker}>Session</Text>
+      <Text style={styles.cardTitle}>Signed in</Text>
+      <Text style={styles.bodyText}>Use this screen only to end your current HHS app session.</Text>
+      <TouchableOpacity
+        activeOpacity={0.85}
+        disabled={signingOut}
+        onPress={() => void handleSignOut()}
+        style={[styles.secondaryButton, signingOut && styles.buttonDisabled]}
+      >
+        <Text style={styles.secondaryButtonText}>{signingOut ? 'Signing out...' : 'Sign Out'}</Text>
+      </TouchableOpacity>
+    </View>
   );
 
   const renderAboutHhs = () => {
@@ -709,6 +700,7 @@ export function NativeAccountSettingsScreen({
     <>
       {user ? (
         <>
+          {renderAccountSummary()}
           {renderBeerVisibilitySettings()}
           {renderNotificationSettings()}
         </>

@@ -2,7 +2,7 @@
   "expo": {
     "name": "Hallowed Hop Society",
     "slug": "hhs-native",
-    "version": "1.0.81",
+    "version": "1.0.82",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -26,7 +26,7 @@
         "backgroundColor": "#191726"
       },
       "package": "com.zplotindustries.hallowedhopsociety",
-      "versionCode": 82,
+      "versionCode": 83,
       "permissions": [
         "INTERNET",
         "POST_NOTIFICATIONS",
@@ -74,4 +74,3 @@
     "primaryColor": "#191726"
   }
 }
-

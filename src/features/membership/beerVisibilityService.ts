@@ -56,7 +56,8 @@ export function getEffectiveBeerVisibilityPreference(
   tier: MembershipTier,
   preference: BeerVisibilityPreference | null,
 ): BeerVisibilityPreference {
-  if (tier === 'oddballs') return preference ?? 'participating_only';
+  if (preference) return preference;
+  if (tier === 'oddballs') return 'participating_only';
   return 'all';
 }
 
@@ -67,7 +68,7 @@ export function isParticipatingBeerDay(tier: MembershipTier, dayNumber: number |
 }
 
 export function canSeeAllBeers(profile: Pick<BeerVisibilityProfile, 'effectivePreference' | 'tier'>): boolean {
-  return profile.tier !== 'oddballs' || profile.effectivePreference === 'all';
+  return profile.effectivePreference === 'all';
 }
 
 function isMissingPreferenceColumnError(error: { code?: string; message?: string } | null | undefined) {

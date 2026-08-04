@@ -1,5 +1,6 @@
 import { HHS_WEB_ORIGIN } from '../../config/env';
 import { supabase } from '../../lib/supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   fetchBeerVisibilityPreference,
   type BeerVisibilityPreference,
@@ -38,6 +39,34 @@ export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
   social_reaction_to_your_items: true,
   social_comment_on_your_items: true,
 };
+
+function getNotificationPrefsStorageKey(userId: string) {
+  return `@hhs:notification-preferences:${userId}`;
+}
+
+async function loadLocalNotificationPreferences(userId: string): Promise<NotificationPreferences> {
+  try {
+    const raw = await AsyncStorage.getItem(getNotificationPrefsStorageKey(userId));
+    if (raw) {
+      return {
+        ...DEFAULT_NOTIFICATION_PREFERENCES,
+        ...(JSON.parse(raw) as Partial<NotificationPreferences>),
+      };
+    }
+  } catch (err) {
+    console.warn('[HHS settings] failed to load local notification preferences:', err);
+  }
+
+  return { ...DEFAULT_NOTIFICATION_PREFERENCES };
+}
+
+async function saveLocalNotificationPreferences(userId: string, prefs: NotificationPreferences): Promise<void> {
+  try {
+    await AsyncStorage.setItem(getNotificationPrefsStorageKey(userId), JSON.stringify(prefs));
+  } catch (err) {
+    console.warn('[HHS settings] failed to save local notification preferences:', err);
+  }
+}
 
 export const SOCIAL_NOTIFICATION_KEYS: (keyof Pick<
   NotificationPreferences,
@@ -117,28 +146,40 @@ export async function fetchCurrentUserProfile(userId: string): Promise<HhsProfil
 }
 
 export async function fetchNotificationPreferences(userId: string): Promise<NotificationPreferences> {
-  const response = await fetch(
-    `${HHS_WEB_ORIGIN}/api/notification-preferences?user_id=${encodeURIComponent(userId)}`,
-  );
+  const localPrefs = await loadLocalNotificationPreferences(userId);
 
-  if (!response.ok) {
-    throw new Error(`Notification preferences request failed (${response.status}).`);
+  try {
+    const response = await fetch(
+      `${HHS_WEB_ORIGIN}/api/notification-preferences?user_id=${encodeURIComponent(userId)}`,
+    );
+
+    if (!response.ok) {
+      console.warn('[HHS settings] notification preferences fetch failed:', response.status);
+      return localPrefs;
+    }
+
+    const json = (await response.json()) as {
+      ok?: boolean;
+      prefs?: Partial<NotificationPreferences>;
+      error?: string;
+    };
+
+    if (!json.ok) {
+      console.warn('[HHS settings] notification preferences response was not successful:', json.error);
+      return localPrefs;
+    }
+
+    const nextPrefs = {
+      ...DEFAULT_NOTIFICATION_PREFERENCES,
+      ...localPrefs,
+      ...(json.prefs ?? {}),
+    };
+    await saveLocalNotificationPreferences(userId, nextPrefs);
+    return nextPrefs;
+  } catch (err) {
+    console.warn('[HHS settings] notification preferences fetch error:', err instanceof Error ? err.message : err);
+    return localPrefs;
   }
-
-  const json = (await response.json()) as {
-    ok?: boolean;
-    prefs?: Partial<NotificationPreferences>;
-    error?: string;
-  };
-
-  if (!json.ok) {
-    throw new Error(json.error ?? 'Notification preferences response was not successful.');
-  }
-
-  return {
-    ...DEFAULT_NOTIFICATION_PREFERENCES,
-    ...(json.prefs ?? {}),
-  };
 }
 
 export async function saveNotificationPreferences(
@@ -146,27 +187,34 @@ export async function saveNotificationPreferences(
   email: string | null | undefined,
   prefs: NotificationPreferences,
 ): Promise<void> {
-  const response = await fetch(`${HHS_WEB_ORIGIN}/api/notification-preferences`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      user_id: userId,
-      email: email ?? undefined,
-      ...prefs,
-    }),
-  });
+  await saveLocalNotificationPreferences(userId, prefs);
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || `Notification preferences save failed (${response.status}).`);
-  }
+  try {
+    const response = await fetch(`${HHS_WEB_ORIGIN}/api/notification-preferences`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: userId,
+        email: email ?? undefined,
+        ...prefs,
+      }),
+    });
 
-  const json = (await response.json()) as {
-    ok?: boolean;
-    error?: string;
-  };
+    if (!response.ok) {
+      const text = await response.text();
+      console.warn('[HHS settings] notification preferences backend save failed:', response.status, text);
+      return;
+    }
 
-  if (!json.ok) {
-    throw new Error(json.error ?? 'Notification preferences save was not successful.');
+    const json = (await response.json()) as {
+      ok?: boolean;
+      error?: string;
+    };
+
+    if (!json.ok) {
+      console.warn('[HHS settings] notification preferences backend save was not successful:', json.error);
+    }
+  } catch (err) {
+    console.warn('[HHS settings] notification preferences backend save error:', err instanceof Error ? err.message : err);
   }
 }
