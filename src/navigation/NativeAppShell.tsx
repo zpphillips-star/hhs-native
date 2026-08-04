@@ -274,8 +274,7 @@ const styles = StyleSheet.create({
     paddingTop: 0,
   },
   tabButtonActive: {
-    borderColor: 'rgba(217, 124, 43, 0.45)',
-    backgroundColor: HHS_COLORS.goldDim,
+    // No pill, no background — active state is expressed only through text/ring color.
   },
   tabText: {
     ...HHS_TYPOGRAPHY.body,
@@ -292,21 +291,25 @@ const styles = StyleSheet.create({
   logoCircle: {
     alignItems: 'center',
     backgroundColor: '#08070d',
-    borderColor: 'rgba(217, 124, 43, 0.58)',
+    borderColor: HHS_COLORS.gold,
     borderRadius: 36,
-    borderWidth: 2,
+    borderWidth: 3,
     height: 66,
     justifyContent: 'center',
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOpacity: 0.34,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
+    shadowColor: HHS_COLORS.gold,
+    shadowOpacity: 0.55,
+    shadowRadius: 9,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 6,
     width: 66,
   },
   logoCircleActive: {
-    borderColor: HHS_COLORS.gold,
+    borderColor: HHS_COLORS.goldLight,
     backgroundColor: HHS_COLORS.card,
+    borderWidth: 3.5,
+    shadowOpacity: 0.75,
+    elevation: 9,
   },
   logoImage: {
     height: 104,

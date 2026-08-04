@@ -2,7 +2,7 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Image,
+  ImageBackground,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -612,65 +612,70 @@ export function NativeAccountSettingsScreen({
     const isOctober = new Date().getMonth() === 9;
     return (
       <>
-        {/* Hero heading card */}
-        <View style={styles.card}>
+        {/* Featured hero title — no card, full-width branded display */}
+        <View style={styles.aboutHeroSection}>
           <Text style={styles.aboutDisplayTitle}>HALLOWED{'\n'}HOP SOCIETY</Text>
         </View>
 
-        {/* Hero image */}
-        <View style={styles.aboutImageCard}>
-          <Image
-            source={require('../../../assets/mughhs.webp')}
-            style={styles.aboutHeroImage}
-            resizeMode="cover"
-          />
-        </View>
+        <View style={styles.aboutDivider} />
 
-        {/* Main copy */}
-        <View style={styles.card}>
-          <Text style={styles.bodyText}>
-            As October's chill creeps in and shadows grow long, a devoted fellowship rises to honor the sacred tradition of the hop.
-          </Text>
-          <Text style={styles.bodyText}>
-            <Text style={styles.aboutBodyStrong}>The Hallowed Hop Society</Text>
-            {' is an annual gathering of beer enthusiasts who embark on a solemn (and slightly ridiculous) ritual: '}
-            <Text style={styles.aboutBodyEmphasis}>31 unique beers in 31 haunted days.</Text>
-            {' No repeats. No excuses. Just pure, unfiltered reverence for the craft of brewing.'}
-          </Text>
-          <Text style={styles.bodyText}>
-            Each year brings a new theme, a new lineup of brews, and new initiates brave enough to take the oath. From spiced pumpkin ales to bone-chilling stouts, we drink not just for the flavor—but for the fellowship.
-          </Text>
-          <Text style={styles.quoteText}>Through ritual we pour, through hops we unite.</Text>
-          <Text style={styles.bodyText}>
-            We are a society of the sip, the story, and the sacred pour.
-          </Text>
-          <Text style={styles.bodyText}>
-            If you've got a taste for adventure (and good beer), your place at the circle awaits.
-          </Text>
-        </View>
+        {/* Main copy — mug image as a subtle watermark behind the text */}
+        <ImageBackground
+          imageStyle={styles.aboutWatermarkImage}
+          resizeMode="cover"
+          source={require('../../../assets/mughhs.webp')}
+          style={styles.aboutBodySection}
+        >
+          <View style={styles.aboutBodyContent}>
+            <Text style={styles.bodyText}>
+              As October's chill creeps in and shadows grow long, a devoted fellowship rises to honor the sacred tradition of the hop.
+            </Text>
+            <Text style={styles.bodyText}>
+              <Text style={styles.aboutBodyStrong}>The Hallowed Hop Society</Text>
+              {' is an annual gathering of beer enthusiasts who embark on a solemn (and slightly ridiculous) ritual: '}
+              <Text style={styles.aboutBodyEmphasis}>31 unique beers in 31 haunted days.</Text>
+              {' No repeats. No excuses. Just pure, unfiltered reverence for the craft of brewing.'}
+            </Text>
+            <Text style={styles.bodyText}>
+              Each year brings a new theme, a new lineup of brews, and new initiates brave enough to take the oath. From spiced pumpkin ales to bone-chilling stouts, we drink not just for the flavor—but for the fellowship.
+            </Text>
+            <Text style={styles.quoteText}>Through ritual we pour, through hops we unite.</Text>
+            <Text style={styles.bodyText}>
+              We are a society of the sip, the story, and the sacred pour.
+            </Text>
+            <Text style={styles.bodyText}>
+              If you've got a taste for adventure (and good beer), your place at the circle awaits.
+            </Text>
+          </View>
+        </ImageBackground>
+
+        <View style={styles.aboutDivider} />
 
         {/* Countdown to October (only shown pre-October) */}
         {!isOctober ? (
-          <View style={styles.card}>
-            <Text style={styles.sectionKicker}>The ritual begins in</Text>
-            <View style={styles.aboutCountdownRow}>
-              {[
-                { val: countdown.days, label: 'Days' },
-                { val: countdown.hours, label: 'Hours' },
-                { val: countdown.minutes, label: 'Min' },
-                { val: countdown.seconds, label: 'Sec' },
-              ].map(({ val, label }) => (
-                <View key={label} style={styles.aboutCountdownUnit}>
-                  <Text style={styles.aboutCountdownNum}>{String(val).padStart(2, '0')}</Text>
-                  <Text style={styles.aboutCountdownLabel}>{label}</Text>
-                </View>
-              ))}
+          <>
+            <View style={styles.aboutSection}>
+              <Text style={styles.sectionKicker}>The ritual begins in</Text>
+              <View style={styles.aboutCountdownRow}>
+                {[
+                  { val: countdown.days, label: 'Days' },
+                  { val: countdown.hours, label: 'Hours' },
+                  { val: countdown.minutes, label: 'Min' },
+                  { val: countdown.seconds, label: 'Sec' },
+                ].map(({ val, label }) => (
+                  <View key={label} style={styles.aboutCountdownUnit}>
+                    <Text style={styles.aboutCountdownNum}>{String(val).padStart(2, '0')}</Text>
+                    <Text style={styles.aboutCountdownLabel}>{label}</Text>
+                  </View>
+                ))}
+              </View>
             </View>
-          </View>
+            <View style={styles.aboutDivider} />
+          </>
         ) : null}
 
         {/* Join CTA */}
-        <View style={[styles.card, styles.aboutCtaCard]}>
+        <View style={styles.aboutCtaSection}>
           <Text style={styles.joinTitle}>WANT TO JOIN{'\n'}THE SOCIETY?</Text>
           <TouchableOpacity activeOpacity={0.85} onPress={onOpenAuth} style={styles.primaryButton}>
             <Text style={styles.primaryButtonText}>{user ? 'View Membership' : 'I Want In'}</Text>
@@ -793,10 +798,12 @@ export function NativeAccountSettingsScreen({
                 <Text style={styles.backButtonText}>‹</Text>
               </TouchableOpacity>
             ) : null}
-            <View>
-              <Text style={styles.appKicker}>Hallowed Hop Society</Text>
-              <Text style={styles.headerTitle}>{getHeaderTitle(mode)}</Text>
-            </View>
+          {mode !== 'about' ? (
+              <View>
+                <Text style={styles.appKicker}>Hallowed Hop Society</Text>
+                <Text style={styles.headerTitle}>{getHeaderTitle(mode)}</Text>
+              </View>
+            ) : null}
           </View>
 
           {(mode === 'auth' || mode === 'settings') && (authLoading || loadingDetails) ? (
@@ -1139,23 +1146,60 @@ const styles = StyleSheet.create({
   // --- About HHS page styles ---
   aboutDisplayTitle: {
     ...HHS_TYPOGRAPHY.display,
-    color: COLORS.text,
-    fontSize: 42,
+    color: COLORS.gold,
+    fontSize: 48,
     fontWeight: '900',
-    letterSpacing: 1,
-    lineHeight: 46,
+    letterSpacing: 2.5,
+    lineHeight: 54,
     marginTop: 6,
+    textAlign: 'center',
   },
-  aboutImageCard: {
+  aboutHeroSection: {
+    alignItems: 'center',
+    marginBottom: 8,
+    paddingBottom: 28,
+    paddingTop: 16,
+  },
+  aboutDivider: {
+    backgroundColor: COLORS.border,
+    height: 1,
+    marginBottom: 24,
+    marginHorizontal: 4,
+    marginTop: 4,
+  },
+  aboutSection: {
+    gap: 14,
+    marginBottom: 8,
+    paddingVertical: 4,
+  },
+  aboutBodySection: {
+    marginBottom: 8,
+    overflow: 'hidden',
+  },
+  aboutBodyContent: {
+    gap: 14,
+    paddingVertical: 16,
+  },
+  aboutCtaSection: {
+    alignItems: 'center',
+    gap: 16,
+    paddingBottom: 8,
+    paddingTop: 16,
+  },
+  aboutWatermarkCard: {
+    backgroundColor: COLORS.card,
     borderColor: COLORS.border,
     borderRadius: HHS_STYLES.cardRadius,
     borderWidth: 1,
     marginBottom: 16,
     overflow: 'hidden',
   },
-  aboutHeroImage: {
-    height: 220,
-    width: '100%',
+  aboutWatermarkImage: {
+    opacity: 0.09,
+  },
+  aboutWatermarkContent: {
+    gap: 14,
+    padding: 18,
   },
   aboutBodyEmphasis: {
     color: COLORS.gold,
