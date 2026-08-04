@@ -2,6 +2,7 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   ImageBackground,
   RefreshControl,
   ScrollView,
@@ -614,7 +615,13 @@ export function NativeAccountSettingsScreen({
       <>
         {/* Featured hero title — no card, full-width branded display */}
         <View style={styles.aboutHeroSection}>
+          <Text style={styles.aboutHeroKicker}>The Annual October Ritual</Text>
           <Text style={styles.aboutDisplayTitle}>HALLOWED{'\n'}HOP SOCIETY</Text>
+          <Image
+            resizeMode="contain"
+            source={require('../../../assets/mughhs.webp')}
+            style={styles.aboutHeroImage}
+          />
         </View>
 
         <View style={styles.aboutDivider} />
@@ -1144,6 +1151,24 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   // --- About HHS page styles ---
+  aboutHeroKicker: {
+    ...HHS_TYPOGRAPHY.kicker,
+    color: COLORS.gold,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 2.5,
+    marginBottom: 10,
+    textAlign: 'center',
+    textTransform: 'uppercase',
+  },
+
+  aboutHeroImage: {
+    height: 170,
+    marginTop: 14,
+    opacity: 0.82,
+    width: '72%',
+  },
+
   aboutDisplayTitle: {
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.gold,

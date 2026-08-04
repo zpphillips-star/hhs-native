@@ -1,5 +1,5 @@
 ﻿import { StatusBar } from 'expo-status-bar';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -118,6 +118,13 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
   const { user } = useAuth();
   const beerVisibility = useBeerVisibility(user?.id);
   const [beers, setBeers] = useState<Beer[]>([]);
+
+  // ─── Auto-scroll-to-today (calendar mode only) ───────────────────────────
+  const scrollViewRef = useRef<ScrollView>(null);
+  const [listY, setListY] = useState(0);
+  const [todayRowY, setTodayRowY] = useState<number | null>(null);
+  // Guard: only scroll once per mount; re-mounts when tab is re-selected.
+  const hasScrolledToToday = useRef(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -315,6 +322,25 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
     setTodayWallPosted(false);
     setTodayWallPostText('');
   }, [todayBeer]);
+
+  // ─── Auto-scroll to today when calendar loads ────────────────────────────
+  // Fires once per mount when: mode=calendar, loading complete, todayDay
+  // exists, and both layout positions have been measured.
+  useEffect(() => {
+    if (mode !== 'calendar') return;
+    if (loading) return;
+    if (!todayDay) return;
+    if (todayRowY === null) return;
+    if (hasScrolledToToday.current) return;
+
+    hasScrolledToToday.current = true;
+    // Place today's row ~60 px from the top so there's visible context above.
+    const targetY = Math.max(0, listY + todayRowY - 60);
+    const timer = setTimeout(() => {
+      scrollViewRef.current?.scrollTo({ y: targetY, animated: true });
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [mode, loading, todayDay, listY, todayRowY]);
 
   const openBeerDetail = (beer: Beer) => {
     setSelectedBeer(beer);
@@ -811,7 +837,7 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
 
     const days = Array.from({ length: 31 }, (_, index) => index + 1);
     return (
-      <View style={styles.list}>
+      <View style={styles.list} onLayout={(e) => setListY(e.nativeEvent.layout.y)}>
         {days.map((day) => {
           const beer = beerMap.get(day);
           const isToday = day === todayDay;
@@ -842,6 +868,7 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
               }}
               activeOpacity={canOpenDetail ? 0.82 : 1}
               disabled={!canOpenDetail}
+              onLayout={isToday ? (e) => setTodayRowY(e.nativeEvent.layout.y) : undefined}
             >
               <Text style={[styles.dayNumber, isToday && styles.todayText]}>{day}</Text>
               <View style={styles.listText}>
@@ -976,6 +1003,7 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
       <SafeAreaView style={styles.container} edges={['top']}>
         <StatusBar style="light" backgroundColor={COLORS.background} />
         <ScrollView
+          ref={scrollViewRef}
           contentContainerStyle={[styles.scrollContent, mode === 'calendar' && styles.calendarScrollContent]}
           refreshControl={
             <RefreshControl
