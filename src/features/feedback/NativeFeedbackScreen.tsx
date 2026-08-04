@@ -180,67 +180,87 @@ function SuggestionFormModal({ visible, userEmail, onClose, onSuccess }: Suggest
       onRequestClose={handleClose}
       statusBarTranslucent
     >
+      {/*
+       * KeyboardAvoidingView lifts the sheet off the keyboard.
+       *   iOS  → 'padding' pushes the bottom inset up (standard for bottom-sheets)
+       *   Android → 'height' shrinks the KAV container so the sheet re-anchors above
+       *             the keyboard (undefined did nothing before this fix)
+       */}
       <KeyboardAvoidingView
         style={styles.modalBg}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <View style={styles.modalSheet}>
-          {/* Handle */}
+          {/* Handle — sits outside the scroll so it stays pinned at the top */}
           <View style={styles.modalHandle} />
 
-          <Text style={styles.modalKicker}>Hallowed Hop Society</Text>
-          <Text style={styles.modalTitle}>Suggest a Feature</Text>
-          <Text style={styles.modalSubtitle}>
-            Tell the Society what to build next. Your suggestion goes straight to the shared roadmap.
-          </Text>
-
-          {error ? <Text style={styles.formError}>{error}</Text> : null}
-
-          <TextInput
-            style={styles.input}
-            value={title}
-            onChangeText={setTitle}
-            placeholder='Short title (e.g. "Show tap list nearby")'
-            placeholderTextColor="rgba(166,157,141,0.55)"
-            editable={!submitting}
-            maxLength={120}
-          />
-          <TextInput
-            style={[styles.input, styles.textArea]}
-            value={description}
-            onChangeText={setDescription}
-            placeholder="Describe your idea in more detail…"
-            placeholderTextColor="rgba(166,157,141,0.55)"
-            editable={!submitting}
-            multiline
-            numberOfLines={4}
-            textAlignVertical="top"
-            maxLength={600}
-          />
-          <TextInput
-            style={styles.input}
-            value={name}
-            onChangeText={setName}
-            placeholder={userEmail ? `Your name (optional) · ${userEmail}` : 'Your name (optional)'}
-            placeholderTextColor="rgba(166,157,141,0.55)"
-            editable={!submitting}
-            maxLength={80}
-          />
-
-          <TouchableOpacity
-            style={[styles.submitButton, (!title.trim() || submitting) && styles.buttonDisabled]}
-            onPress={() => void handleSubmit()}
-            activeOpacity={0.85}
-            disabled={submitting || !title.trim()}
+          {/*
+           * ScrollView lets the user scroll the form content if the keyboard
+           * still obscures lower fields on very small devices.
+           * keyboardShouldPersistTaps="handled" keeps the keyboard open when
+           * the user taps an action button instead of dismissing it first.
+           */}
+          <ScrollView
+            bounces={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.formScrollContent}
           >
-            <Text style={styles.submitButtonText}>
-              {submitting ? 'Submitting…' : 'Submit Suggestion'}
+            <Text style={styles.modalKicker}>Hallowed Hop Society</Text>
+            <Text style={styles.modalTitle}>Suggest a Feature</Text>
+            <Text style={styles.modalSubtitle}>
+              Tell the Society what to build next. Your suggestion goes straight to the shared roadmap.
             </Text>
-          </TouchableOpacity>
 
-          <TouchableOpacity style={styles.cancelButton} onPress={handleClose} activeOpacity={0.75}>
-            <Text style={styles.cancelButtonText}>Cancel</Text>
-          </TouchableOpacity>
+            {error ? <Text style={styles.formError}>{error}</Text> : null}
+
+            <TextInput
+              style={styles.input}
+              value={title}
+              onChangeText={setTitle}
+              placeholder='Short title (e.g. "Show tap list nearby")'
+              placeholderTextColor="rgba(166,157,141,0.55)"
+              editable={!submitting}
+              maxLength={120}
+            />
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              value={description}
+              onChangeText={setDescription}
+              placeholder="Describe your idea in more detail…"
+              placeholderTextColor="rgba(166,157,141,0.55)"
+              editable={!submitting}
+              multiline
+              numberOfLines={4}
+              textAlignVertical="top"
+              maxLength={600}
+            />
+            <TextInput
+              style={styles.input}
+              value={name}
+              onChangeText={setName}
+              placeholder={userEmail ? `Your name (optional) · ${userEmail}` : 'Your name (optional)'}
+              placeholderTextColor="rgba(166,157,141,0.55)"
+              editable={!submitting}
+              maxLength={80}
+            />
+
+            <TouchableOpacity
+              style={[styles.submitButton, (!title.trim() || submitting) && styles.buttonDisabled]}
+              onPress={() => void handleSubmit()}
+              activeOpacity={0.85}
+              disabled={submitting || !title.trim()}
+            >
+              <Text style={styles.submitButtonText}>
+                {submitting ? 'Submitting…' : 'Submit Suggestion'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.cancelButton} onPress={handleClose} activeOpacity={0.75}>
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </ScrollView>
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -649,9 +669,15 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
     borderTopWidth: 1,
-    paddingBottom: 40,
+    // paddingBottom lives in formScrollContent so the ScrollView absorbs it
     paddingHorizontal: 20,
     paddingTop: 12,
+    // Cap height so the sheet never exceeds ~80 % of the viewport on small
+    // screens; content scrolls inside the ScrollView instead.
+    maxHeight: '82%',
+  },
+  formScrollContent: {
+    paddingBottom: 40,
   },
   modalHandle: {
     alignSelf: 'center',

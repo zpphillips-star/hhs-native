@@ -291,25 +291,28 @@ const styles = StyleSheet.create({
   logoCircle: {
     alignItems: 'center',
     backgroundColor: '#08070d',
-    borderColor: HHS_COLORS.gold,
+    // Inactive: very thin, dim ring — just enough to hint at the circle boundary.
+    borderColor: HHS_COLORS.borderStrong,   // rgba(217, 124, 43, 0.45)
     borderRadius: 36,
-    borderWidth: 3,
+    borderWidth: 1.5,
     height: 66,
     justifyContent: 'center',
     overflow: 'hidden',
     shadowColor: HHS_COLORS.gold,
-    shadowOpacity: 0.55,
-    shadowRadius: 9,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 6,
+    shadowOpacity: 0.18,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
     width: 66,
   },
   logoCircleActive: {
-    borderColor: HHS_COLORS.goldLight,
+    // Active: thick, bright orange ring with strong glow — unmistakably selected.
+    borderColor: HHS_COLORS.goldLight,      // #e8953a — full bright orange
     backgroundColor: HHS_COLORS.card,
-    borderWidth: 3.5,
-    shadowOpacity: 0.75,
-    elevation: 9,
+    borderWidth: 5,
+    shadowOpacity: 0.90,
+    shadowRadius: 14,
+    elevation: 14,
   },
   logoImage: {
     height: 104,

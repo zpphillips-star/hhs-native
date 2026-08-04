@@ -1401,17 +1401,14 @@ const styles = StyleSheet.create({
     width: 96,
   },
   list: {
-    backgroundColor: COLORS.card,
-    borderColor: COLORS.border,
-    borderRadius: 14,
-    borderWidth: 1,
-    overflow: 'hidden',
+    // Flat row list — no card background, border, or radius.
+    // Dividers come from listItemSeparator on each row.
   },
   listItem: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 14,
-    paddingHorizontal: 16,
+    paddingHorizontal: 0,
     paddingVertical: 14,
   },
   listItemSeparator: {
@@ -1592,7 +1589,7 @@ const styles = StyleSheet.create({
   },
   starRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 4,
   },
   societyRatingRow: {
     gap: 6,
@@ -1605,9 +1602,9 @@ const styles = StyleSheet.create({
   },
   starButton: {
     alignItems: 'center',
-    height: 42,
+    height: 46,
     justifyContent: 'center',
-    width: 42,
+    width: 46,
   },
   starButtonActive: {
     // active state conveyed by starTextActive color — no background or border
@@ -1615,8 +1612,8 @@ const styles = StyleSheet.create({
   starText: {
     ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
-    fontSize: 22,
-    lineHeight: 22,
+    fontSize: 40,
+    lineHeight: 44,
     textAlign: 'center',
   },
   starTextActive: {
