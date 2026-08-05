@@ -148,9 +148,14 @@ export async function fetchCurrentUserProfile(userId: string): Promise<HhsProfil
 export async function fetchNotificationPreferences(userId: string): Promise<NotificationPreferences> {
   const localPrefs = await loadLocalNotificationPreferences(userId);
 
+  // Use a 7-second timeout so a hanging server never blocks the settings UI from rendering.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 7000);
+
   try {
     const response = await fetch(
       `${HHS_WEB_ORIGIN}/api/notification-preferences?user_id=${encodeURIComponent(userId)}`,
+      { signal: controller.signal },
     );
 
     if (!response.ok) {
@@ -177,8 +182,15 @@ export async function fetchNotificationPreferences(userId: string): Promise<Noti
     await saveLocalNotificationPreferences(userId, nextPrefs);
     return nextPrefs;
   } catch (err) {
-    console.warn('[HHS settings] notification preferences fetch error:', err instanceof Error ? err.message : err);
+    const message = err instanceof Error ? err.message : String(err);
+    if (controller.signal.aborted) {
+      console.warn('[HHS settings] notification preferences fetch timed out; using local cache.');
+    } else {
+      console.warn('[HHS settings] notification preferences fetch error:', message);
+    }
     return localPrefs;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -187,7 +199,13 @@ export async function saveNotificationPreferences(
   email: string | null | undefined,
   prefs: NotificationPreferences,
 ): Promise<void> {
+  // Always persist locally first — keeps optimistic update durable across restarts.
   await saveLocalNotificationPreferences(userId, prefs);
+
+  // Use a 7-second timeout so a hanging server never keeps prefSavingKey set and
+  // freezes all toggles in a disabled state for the rest of the session.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 7000);
 
   try {
     const response = await fetch(`${HHS_WEB_ORIGIN}/api/notification-preferences`, {
@@ -198,6 +216,7 @@ export async function saveNotificationPreferences(
         email: email ?? undefined,
         ...prefs,
       }),
+      signal: controller.signal,
     });
 
     if (!response.ok) {
@@ -215,6 +234,12 @@ export async function saveNotificationPreferences(
       console.warn('[HHS settings] notification preferences backend save was not successful:', json.error);
     }
   } catch (err) {
-    console.warn('[HHS settings] notification preferences backend save error:', err instanceof Error ? err.message : err);
+    if (controller.signal.aborted) {
+      console.warn('[HHS settings] notification preferences backend save timed out; preference kept in local cache.');
+    } else {
+      console.warn('[HHS settings] notification preferences backend save error:', err instanceof Error ? err.message : err);
+    }
+  } finally {
+    clearTimeout(timer);
   }
 }

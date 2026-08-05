@@ -1,5 +1,5 @@
 import { StatusBar } from 'expo-status-bar';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -143,6 +143,16 @@ export function NativeAccountSettingsScreen({
   const displayName = useMemo(() => getDisplayName(profile, user?.email), [profile, user?.email]);
   const normalizedTier = useMemo(() => normalizeMembershipTier(profile?.tier), [profile?.tier]);
 
+  // Mounted guard: prevents async callbacks from calling setState after the
+  // component unmounts (e.g. user navigates away while a fetch is in flight).
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const loadAccountDetails = useCallback(async (showRefresh = false) => {
     if (!user?.id) {
       setProfile(null);
@@ -166,8 +176,10 @@ export function NativeAccountSettingsScreen({
 
     try {
       const nextProfile = await fetchCurrentUserProfile(user.id);
+      if (!mountedRef.current) return;
       setProfile(nextProfile);
     } catch (err) {
+      if (!mountedRef.current) return;
       const message = err instanceof Error ? err.message : 'Could not load account profile.';
       setProfile(null);
       setDetailsError(`Profile: ${message}`);
@@ -175,23 +187,29 @@ export function NativeAccountSettingsScreen({
 
     try {
       const nextPrefs = await fetchNotificationPreferences(user.id);
+      if (!mountedRef.current) return;
       setPrefs(nextPrefs);
       setPrefError(null);
     } catch (err) {
+      if (!mountedRef.current) return;
       const message = err instanceof Error ? err.message : 'Could not load notification preferences.';
       setPrefError(message);
     }
 
     try {
       const nextPushStatus = await getCurrentPushPermissionStatus();
+      if (!mountedRef.current) return;
       setPushStatus(nextPushStatus);
     } catch (err) {
+      if (!mountedRef.current) return;
       const message = err instanceof Error ? err.message : 'Could not read push permission status.';
       setPushStatus('unknown');
       setPushMessage(message);
     } finally {
-      setLoadingDetails(false);
-      setRefreshing(false);
+      if (mountedRef.current) {
+        setLoadingDetails(false);
+        setRefreshing(false);
+      }
     }
   }, [user?.id]);
 

@@ -9,7 +9,7 @@
  *   • Pull-to-refresh on the whole scroll view
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -283,6 +283,16 @@ export function NativeFeedbackScreen({ onBack }: NativeFeedbackScreenProps) {
   const [formVisible, setFormVisible] = useState(false);
   const [justSubmitted, setJustSubmitted] = useState(false);
 
+  // Mounted guard: prevents the Supabase callback from calling setState after
+  // the user presses back and this component unmounts mid-fetch.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const loadItems = useCallback(async (isRefresh = false) => {
     if (isRefresh) {
       setRefreshing(true);
@@ -292,13 +302,17 @@ export function NativeFeedbackScreen({ onBack }: NativeFeedbackScreenProps) {
     setLoadError(null);
     try {
       const data = await fetchFeedbackItems();
+      if (!mountedRef.current) return;
       setItems(data);
     } catch (err) {
+      if (!mountedRef.current) return;
       const message = err instanceof Error ? err.message : 'Could not load feedback items.';
       setLoadError(message);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (mountedRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
