@@ -286,10 +286,17 @@ export function NativeFeedbackScreen({ onBack }: NativeFeedbackScreenProps) {
   // Mounted guard: prevents the Supabase callback from calling setState after
   // the user presses back and this component unmounts mid-fetch.
   const mountedRef = useRef(true);
+  // Tracks the 5-second "just submitted" toast timer so we can cancel it on
+  // unmount and avoid a setState call after the screen is gone.
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      if (toastTimerRef.current !== null) {
+        clearTimeout(toastTimerRef.current);
+        toastTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -323,7 +330,14 @@ export function NativeFeedbackScreen({ onBack }: NativeFeedbackScreenProps) {
   const handleSubmitSuccess = () => {
     setFormVisible(false);
     setJustSubmitted(true);
-    setTimeout(() => setJustSubmitted(false), 5000);
+    // Guard: if the user presses back before the 5s toast expires the timer
+    // is cancelled in the mountedRef cleanup above, so setJustSubmitted never
+    // fires on an unmounted component.
+    if (toastTimerRef.current !== null) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => {
+      if (mountedRef.current) setJustSubmitted(false);
+      toastTimerRef.current = null;
+    }, 5000);
     void loadItems(true);
   };
 
