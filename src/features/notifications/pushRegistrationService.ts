@@ -157,6 +157,22 @@ export async function registerDeviceForPushNotifications(
   }
 }
 
+/**
+ * Returns true if this device has a locally-cached push token for the given user,
+ * meaning registration completed successfully at least once.
+ * Does NOT validate that the token is still accepted by the backend or Expo.
+ */
+export async function isDeviceRegisteredLocally(user: PushRegistrationUser): Promise<boolean> {
+  try {
+    if (!user.id) return false;
+    const cacheKey = getPushTokenStorageKey({ id: user.id, email: user.email });
+    const cached = await AsyncStorage.getItem(cacheKey);
+    return Boolean(cached);
+  } catch {
+    return false;
+  }
+}
+
 export async function unregisterCachedPushToken(user: PushRegistrationUser): Promise<{ ok: boolean; skipped?: boolean; message: string }> {
   let pushUser: { id: string; email?: string };
   try {

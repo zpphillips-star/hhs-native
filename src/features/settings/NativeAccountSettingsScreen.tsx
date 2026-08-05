@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Image,
   ImageBackground,
+  Linking,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -18,6 +19,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { HHS_WEB_ORIGIN } from '../../config/env';
 import {
   getCurrentPushPermissionStatus,
+  isDeviceRegisteredLocally,
   registerDeviceForPushNotifications,
   unregisterCachedPushToken,
   type PushPermissionStatus,
@@ -132,6 +134,7 @@ export function NativeAccountSettingsScreen({
   const [pushStatus, setPushStatus] = useState<PushPermissionStatus>('unknown');
   const [pushMessage, setPushMessage] = useState<string | null>(null);
   const [registeringPush, setRegisteringPush] = useState(false);
+  const [isDeviceRegistered, setIsDeviceRegistered] = useState(false);
   const [feedbackTitle, setFeedbackTitle] = useState('');
   const [feedbackDescription, setFeedbackDescription] = useState('');
   const [feedbackName, setFeedbackName] = useState('');
@@ -200,6 +203,9 @@ export function NativeAccountSettingsScreen({
       const nextPushStatus = await getCurrentPushPermissionStatus();
       if (!mountedRef.current) return;
       setPushStatus(nextPushStatus);
+      // Check local cache to see if this device was already registered.
+      const registered = await isDeviceRegisteredLocally({ id: user.id, email: user.email });
+      if (mountedRef.current) setIsDeviceRegistered(registered);
     } catch (err) {
       if (!mountedRef.current) return;
       const message = err instanceof Error ? err.message : 'Could not read push permission status.';
@@ -250,6 +256,10 @@ export function NativeAccountSettingsScreen({
 
     setPushStatus(result.status);
     setPushMessage(result.message);
+    // Update registration state so social notification toggles show as active.
+    if (result.ok && result.registered) {
+      setIsDeviceRegistered(true);
+    }
     setRegisteringPush(false);
   }, [profile?.email, registeringPush, user?.email, user?.id]);
 
@@ -465,87 +475,150 @@ export function NativeAccountSettingsScreen({
     </View>
   );
 
-  const renderNotificationSettings = () => (
-    <View style={styles.card}>
-      <Text style={styles.sectionKicker}>Notifications</Text>
-      <Text style={styles.cardTitle}>Notification Settings</Text>
-      <Text style={styles.bodyText}>
-        Manage native push registration and the same saved preferences used by the web app. All Social
-        is a select-all helper; each child category still controls its own notification type.
-      </Text>
-      <View style={styles.pushStatusBox}>
-        <Text style={styles.infoLabel}>Push Device</Text>
-        <Text style={styles.infoValue}>
-          {pushStatus === 'granted'
-            ? 'System permission granted'
-            : pushStatus === 'denied'
-              ? 'System permission denied'
-              : pushStatus === 'undetermined'
-                ? 'Permission not requested'
-                : 'Permission status unknown'}
+  const renderNotificationSettings = () => {
+    const pushGranted = pushStatus === 'granted';
+    const pushDenied = pushStatus === 'denied';
+    const pushPending = pushStatus === 'undetermined' || pushStatus === 'unknown';
+
+    // Device registration label shown under the status line
+    const registrationLabel = pushGranted
+      ? isDeviceRegistered
+        ? '✓ This device is registered for push notifications.'
+        : 'Device not yet registered — tap the button below.'
+      : null;
+
+    return (
+      <View style={styles.card}>
+        <Text style={styles.sectionKicker}>Notifications</Text>
+        <Text style={styles.cardTitle}>Notification Settings</Text>
+        <Text style={styles.bodyText}>
+          Daily Beer is a local 4 PM device reminder — it works without push registration once system
+          permission is granted. Social notifications (comments, reactions) are server-sent push alerts
+          and require both system permission AND device registration below.
         </Text>
-        {pushMessage ? <Text style={styles.helperText}>{pushMessage}</Text> : null}
-        <TouchableOpacity
-          activeOpacity={0.85}
-          disabled={registeringPush}
-          onPress={() => void handleRegisterPush()}
-          style={[styles.primaryButton, registeringPush && styles.buttonDisabled]}
-        >
-          <Text style={styles.primaryButtonText}>
-            {registeringPush ? 'Registering...' : pushStatus === 'granted' ? 'Register This Device' : 'Enable Push Notifications'}
+
+        {/* ── Push device status box ── */}
+        <View style={styles.pushStatusBox}>
+          <Text style={styles.infoLabel}>Push Device</Text>
+          <Text style={styles.infoValue}>
+            {pushGranted
+              ? 'System permission granted'
+              : pushDenied
+                ? 'System permission denied'
+                : pushPending
+                  ? 'Permission not yet granted'
+                  : 'Permission status unknown'}
           </Text>
-        </TouchableOpacity>
+          {registrationLabel ? (
+            <Text style={[styles.helperText, isDeviceRegistered && styles.helperTextSuccess]}>
+              {registrationLabel}
+            </Text>
+          ) : null}
+          {pushMessage ? <Text style={styles.helperText}>{pushMessage}</Text> : null}
+
+          {/* When denied: redirect to system settings (Android) instead of re-requesting */}
+          {pushDenied ? (
+            <>
+              <Text style={styles.warningText}>
+                Push is blocked in system settings. Open your device&apos;s notification settings to
+                re-enable it, then return here and tap &quot;Register This Device&quot;.
+              </Text>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => void Linking.openSettings()}
+                style={styles.primaryButton}
+              >
+                <Text style={styles.primaryButtonText}>Open Notification Settings</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <TouchableOpacity
+              activeOpacity={0.85}
+              disabled={registeringPush}
+              onPress={() => void handleRegisterPush()}
+              style={[styles.primaryButton, registeringPush && styles.buttonDisabled]}
+            >
+              <Text style={styles.primaryButtonText}>
+                {registeringPush
+                  ? 'Registering…'
+                  : isDeviceRegistered
+                    ? 'Re-register This Device'
+                    : pushGranted
+                      ? 'Register This Device'
+                      : 'Enable Push Notifications'}
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {prefError ? <Text style={styles.errorText}>{prefError}</Text> : null}
+
+        {/* ── Daily Beer (local reminder, no push registration required) ── */}
+        <PreferenceRow
+          disabled={Boolean(prefSavingKey)}
+          enabled={prefs.daily_beer}
+          label="Daily Beer Reminder"
+          description={
+            pushGranted
+              ? 'Daily 4 PM local reminder when your beer of the day drops.'
+              : 'Requires system notification permission (see above).'
+          }
+          onValueChange={(value) => void handlePreferenceChange('daily_beer', value)}
+        />
+
+        {/* ── Social notifications (require push registration) ── */}
+        {!pushGranted || !isDeviceRegistered ? (
+          <View style={styles.pushRequiredNote}>
+            <Text style={styles.pushRequiredNoteText}>
+              {pushDenied
+                ? '⚠ Social push notifications are disabled until system permission is restored.'
+                : '⚠ Social push notifications require device registration (above). Preferences are saved and will take effect once registered.'}
+            </Text>
+          </View>
+        ) : null}
+        <PreferenceRow
+          disabled={Boolean(prefSavingKey)}
+          enabled={prefs.social_all}
+          label="All Social Notifications"
+          description="Turn all four social notification categories on or off together."
+          onValueChange={(value) => void handlePreferenceChange('social_all', value)}
+        />
+        <PreferenceRow
+          disabled={Boolean(prefSavingKey)}
+          enabled={prefs.social_new_comment}
+          indented
+          label="New Comment"
+          description="Someone comments on any post."
+          onValueChange={(value) => void handlePreferenceChange('social_new_comment', value)}
+        />
+        <PreferenceRow
+          disabled={Boolean(prefSavingKey)}
+          enabled={prefs.social_new_reaction}
+          indented
+          label="New Reaction"
+          description="Someone reacts to any post."
+          onValueChange={(value) => void handlePreferenceChange('social_new_reaction', value)}
+        />
+        <PreferenceRow
+          disabled={Boolean(prefSavingKey)}
+          enabled={prefs.social_reaction_to_your_items}
+          indented
+          label="Reaction to Your Items"
+          description="Someone reacts to your post."
+          onValueChange={(value) => void handlePreferenceChange('social_reaction_to_your_items', value)}
+        />
+        <PreferenceRow
+          disabled={Boolean(prefSavingKey)}
+          enabled={prefs.social_comment_on_your_items}
+          indented
+          label="Comment on Your Items"
+          description="Someone comments on your post."
+          onValueChange={(value) => void handlePreferenceChange('social_comment_on_your_items', value)}
+        />
+        {prefSavingKey ? <Text style={styles.settingsSavingText}>Saving notification preferences…</Text> : null}
       </View>
-      {prefError ? <Text style={styles.errorText}>{prefError}</Text> : null}
-      <PreferenceRow
-        disabled={Boolean(prefSavingKey)}
-        enabled={prefs.daily_beer}
-        label="Daily Beer"
-        description="Daily 4 PM reminder when your beer of the day drops."
-        onValueChange={(value) => void handlePreferenceChange('daily_beer', value)}
-      />
-      <PreferenceRow
-        disabled={Boolean(prefSavingKey)}
-        enabled={prefs.social_all}
-        label="All Social Notifications"
-        description="Turn all four social notification categories on or off together."
-        onValueChange={(value) => void handlePreferenceChange('social_all', value)}
-      />
-      <PreferenceRow
-        disabled={Boolean(prefSavingKey)}
-        enabled={prefs.social_new_comment}
-        indented
-        label="New Comment"
-        description="Someone comments on any post."
-        onValueChange={(value) => void handlePreferenceChange('social_new_comment', value)}
-      />
-      <PreferenceRow
-        disabled={Boolean(prefSavingKey)}
-        enabled={prefs.social_new_reaction}
-        indented
-        label="New Reaction"
-        description="Someone reacts to any post."
-        onValueChange={(value) => void handlePreferenceChange('social_new_reaction', value)}
-      />
-      <PreferenceRow
-        disabled={Boolean(prefSavingKey)}
-        enabled={prefs.social_reaction_to_your_items}
-        indented
-        label="Reaction to Your Items"
-        description="Someone reacts to your post."
-        onValueChange={(value) => void handlePreferenceChange('social_reaction_to_your_items', value)}
-      />
-      <PreferenceRow
-        disabled={Boolean(prefSavingKey)}
-        enabled={prefs.social_comment_on_your_items}
-        indented
-        label="Comment on Your Items"
-        description="Someone comments on your post."
-        onValueChange={(value) => void handlePreferenceChange('social_comment_on_your_items', value)}
-      />
-      {prefSavingKey ? <Text style={styles.settingsSavingText}>Saving notification preferences…</Text> : null}
-    </View>
-  );
+    );
+  };
 
   const renderBeerVisibilitySettings = () => {
     if (!user || !profile) return null;
@@ -982,6 +1055,23 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontStyle: 'italic',
     lineHeight: 20,
+  },
+  helperTextSuccess: {
+    color: '#8fd48f',
+    fontStyle: 'normal',
+  },
+  pushRequiredNote: {
+    backgroundColor: 'rgba(200, 150, 43, 0.08)',
+    borderColor: 'rgba(200, 150, 43, 0.25)',
+    borderRadius: 10,
+    borderWidth: 1,
+    padding: 11,
+  },
+  pushRequiredNoteText: {
+    ...HHS_TYPOGRAPHY.body,
+    color: COLORS.gold,
+    fontSize: 13,
+    lineHeight: 19,
   },
   successText: {
     ...HHS_TYPOGRAPHY.body,
