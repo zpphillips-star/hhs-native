@@ -316,7 +316,6 @@ const styles = StyleSheet.create({
   },
   logoImage: {
     height: 104,
-    transform: [{ translateY: 5 }],
     width: 104,
   },
   tabTextActive: {
