@@ -654,22 +654,30 @@ export function NativeAccountSettingsScreen({
           Your membership: {formatTier(profile?.tier)}.{'\n\n'}
           Choose which beer calendar list you want to see. Hallowed shows all 31 beers; Oddballs shows the
           16 odd-numbered beer days.
-          {normalizedTier === 'oddballs'
-            ? ' If you view the Hallowed list, even-day beers stay view-only: no rating and no beer-specific Wall post.'
-            : ' This changes calendar visibility only; your actual membership stays unchanged.'}
+          {normalizedTier !== 'oddballs'
+            ? ' This changes calendar visibility only; your actual membership stays unchanged.'
+            : ''}
         </Text>
         {beerVisibilityError ? <Text style={styles.errorText}>{beerVisibilityError}</Text> : null}
         <PreferenceRow
           disabled={beerVisibilitySaving}
           enabled={showingHallowedCalendar}
-          label="Hallowed calendar"
+          label={normalizedTier === 'oddballs' ? 'Show all beers' : 'Show all 31 beers'}
           description={
             showingHallowedCalendar
               ? 'Showing the full 31-beer calendar.'
-              : 'Showing the Oddballs 16-beer calendar.'
+              : normalizedTier === 'oddballs'
+                ? 'Showing your 16 odd-day beers only.'
+                : 'Showing the Oddballs 16-beer calendar.'
           }
           onValueChange={(value) => void handleBeerVisibilityChange(value)}
         />
+        {normalizedTier === 'oddballs' ? (
+          <Text style={styles.helperText}>
+            You can view all Hallowed beers, but Oddball members can only rate and post about beers
+            included in their membership.
+          </Text>
+        ) : null}
         {beerVisibilitySaving ? <Text style={styles.settingsSavingText}>Saving beer visibility…</Text> : null}
       </View>
     );
