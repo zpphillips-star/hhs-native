@@ -878,6 +878,7 @@ export function NativeAccountSettingsScreen({
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <StatusBar style="light" backgroundColor={COLORS.background} />
         <ScrollView
+          style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           refreshControl={
             user ? (
@@ -933,6 +934,9 @@ export function NativeAccountSettingsScreen({
 const styles = StyleSheet.create({
   container: {
     backgroundColor: COLORS.background,
+    flex: 1,
+  },
+  scrollView: {
     flex: 1,
   },
   scrollContent: {
