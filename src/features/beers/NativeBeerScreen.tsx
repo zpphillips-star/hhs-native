@@ -95,8 +95,13 @@ function getCalendarState(now: Date) {
   const isActiveMonth =
     now.getFullYear() === BEER_CALENDAR_YEAR && now.getMonth() === BEER_CALENDAR_MONTH_INDEX;
   const isComplete = now.getTime() > getCalendarEnd().getTime();
-  const todayDay = isActiveMonth ? now.getDate() : null;
-  const revealedThroughDay = isActiveMonth ? now.getDate() : isComplete ? BEER_CALENDAR_DAYS : null;
+  // todayDay is ONLY non-null during Oct 1–31, 2026 (the live event window).
+  // The `!isBeforeStart` guard is belt-and-suspenders: `isActiveMonth` already
+  // requires the correct year+month, but the explicit pre-event null prevents
+  // any future regression if month constants drift or a test date falls outside
+  // the window. No calendar day should be highlighted as "today" before Oct 1.
+  const todayDay = isActiveMonth && !isBeforeStart ? now.getDate() : null;
+  const revealedThroughDay = isActiveMonth && !isBeforeStart ? now.getDate() : isComplete ? BEER_CALENDAR_DAYS : null;
 
   return {
     isBeforeStart,
@@ -862,6 +867,7 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
       <View style={styles.list} onLayout={(e) => setListY(e.nativeEvent.layout.y)}>
         {days.map((day) => {
           const beer = beerMap.get(day);
+          // todayDay is null outside Oct 1–31 → no row is highlighted pre-event.
           const isToday = day === todayDay;
           const isPast = revealedThroughDay ? day < revealedThroughDay : false;
           const shouldReveal = Boolean(beer && revealedThroughDay && day <= revealedThroughDay);
