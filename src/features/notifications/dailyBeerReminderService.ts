@@ -25,6 +25,19 @@ const DAILY_BEER_PREF_KEY = '@hhs:daily-beer-reminder-enabled';
 const REMINDER_HOUR = 16;
 const REMINDER_MINUTE = 0;
 
+// ── October 2026 gate ──────────────────────────────────────────────────────────
+// Daily beer reminders are only meaningful during the 31-day October 2026 event.
+// All of October 2026 is PDT (UTC-7); DST ends on Nov 1, 2026.
+//   Oct 1, 2026 00:00 PDT = Oct 1, 2026 07:00 UTC
+//   Nov 1, 2026 00:00 PDT = Nov 1, 2026 07:00 UTC
+const OCTOBER_2026_START_UTC = Date.UTC(2026, 9, 1, 7, 0, 0);   // Oct 1 00:00 PDT
+const OCTOBER_2026_END_UTC   = Date.UTC(2026, 10, 1, 7, 0, 0);  // Nov 1 00:00 PDT (exclusive)
+
+function isWithinOctober2026(): boolean {
+  const now = Date.now();
+  return now >= OCTOBER_2026_START_UTC && now < OCTOBER_2026_END_UTC;
+}
+
 // ── Rotating copy pool ─────────────────────────────────────────────────────────
 // Generic beer-time prompts — no specific beer name or details revealed.
 // Rotate by deterministic day-of-year index so the device gets variety over 31 days.
@@ -99,9 +112,17 @@ export async function cancelDailyBeerReminder(): Promise<void> {
 
 /**
  * Schedule the daily beer reminder at 4:00 PM local time.
+ * Only schedules during the October 2026 event window (Pacific time).
  * Cancels any existing scheduled instance first to avoid duplicates.
+ * Outside October 2026, cancels any stale reminder and returns.
  */
 export async function scheduleDailyBeerReminder(): Promise<void> {
+  if (!isWithinOctober2026()) {
+    // Outside the event window — cancel any stale reminder and do not schedule.
+    await cancelDailyBeerReminder();
+    return;
+  }
+
   await ensureDailyBeerChannel();
   await cancelDailyBeerReminder();
 
@@ -126,6 +147,7 @@ export async function scheduleDailyBeerReminder(): Promise<void> {
 /**
  * Sync the daily beer reminder with a user-specified enabled/disabled preference.
  * - Caches the preference locally so startup sync can work without a network call.
+ * - Outside the October 2026 event window: always cancels, even if enabled=true.
  * - If enabled: schedules (requires permission already granted — never requests).
  * - If disabled: cancels.
  */
@@ -133,7 +155,7 @@ export async function syncDailyBeerReminder(enabled: boolean): Promise<void> {
   // Persist preference locally for startup re-schedule after app updates.
   await AsyncStorage.setItem(DAILY_BEER_PREF_KEY, enabled ? '1' : '0').catch(() => {});
 
-  if (!enabled) {
+  if (!enabled || !isWithinOctober2026()) {
     await cancelDailyBeerReminder();
     return;
   }
@@ -150,9 +172,16 @@ export async function syncDailyBeerReminder(enabled: boolean): Promise<void> {
  * Re-schedules the reminder only if it is not already queued (handles app updates
  * that may clear scheduled notifications) and the user preference allows it.
  * Never requests notification permission.
+ * Outside the October 2026 event window: cancels any stale reminder and returns.
  */
 export async function syncDailyBeerReminderOnStartup(): Promise<void> {
   try {
+    // Outside the October 2026 event window — cancel any stale reminder silently.
+    if (!isWithinOctober2026()) {
+      await cancelDailyBeerReminder();
+      return;
+    }
+
     // If already scheduled, nothing to do.
     const scheduled = await Notifications.getAllScheduledNotificationsAsync();
     const alreadyQueued = scheduled.some((n) => n.identifier === DAILY_REMINDER_ID);

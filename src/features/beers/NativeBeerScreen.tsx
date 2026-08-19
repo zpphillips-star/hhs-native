@@ -36,19 +36,12 @@ import {
 const COLORS = HHS_COLORS;
 
 // ─── LAUNCH MODE CONFIG ──────────────────────────────────────────────────────
-// Set BEER_CALENDAR_PREVIEW_MODE = true  for internal/test builds (August live,
-// all beer flows accessible now).
-// Set BEER_CALENDAR_PREVIEW_MODE = false for the production October launch
-// (hides beers until October 1, shows countdown, uses real October dates).
-//
-// TO SWITCH TO OCTOBER LAUNCH: change the line below to `false` and rebuild.
+// Production October 2026 launch. Preview mode has been disabled.
+// Month index is 0-based: 9 = October.
 // ─────────────────────────────────────────────────────────────────────────────
-const BEER_CALENDAR_PREVIEW_MODE = true;
-
 const BEER_CALENDAR_YEAR = 2026;
-// Month index is 0-based: 7 = August (preview), 9 = October (launch)
-const BEER_CALENDAR_MONTH_INDEX = BEER_CALENDAR_PREVIEW_MODE ? 7 : 9;
-const BEER_CALENDAR_MONTH_NAME = BEER_CALENDAR_PREVIEW_MODE ? 'August' : 'October';
+const BEER_CALENDAR_MONTH_INDEX = 9; // October
+const BEER_CALENDAR_MONTH_NAME = 'October';
 const BEER_CALENDAR_DAYS = 31;
 
 type NativeBeerScreenProps = {
@@ -729,14 +722,43 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
     }
 
     if (!isActiveMonth || !todayBeer) {
+      if (isBeforeStart) {
+        const countdown = getCountdownParts(now);
+        return (
+          <View style={styles.preOctoberSection}>
+            <View style={styles.ritualDivider}>
+              <View style={styles.ritualLine} />
+              <Text style={styles.kicker}>The Ritual Begins Soon</Text>
+              <View style={styles.ritualLine} />
+            </View>
+            <Text style={styles.countdownLabel}>October 1st begins in</Text>
+            <View style={styles.countdownRow}>
+              <Text style={styles.countdownNumber}>{countdown.days}</Text>
+              <Text style={styles.countdownUnit}>days</Text>
+              <Text style={styles.countdownDot}>·</Text>
+              <Text style={styles.countdownNumber}>{countdown.hours}</Text>
+              <Text style={styles.countdownUnit}>hrs</Text>
+            </View>
+            <View style={styles.manifestoCard}>
+              <Text style={styles.manifestoText}>
+                Thirty-one days. Thirty-one beers. Each selection chosen from the finest craft breweries of the
+                Pacific Northwest — north of Marysville, all the way to the border. The deliberation is underway.
+              </Text>
+            </View>
+            <Text style={styles.bodyText}>
+              When October 1st arrives, your daily beer will appear here. Until then, the taps are sealed and the
+              circle is gathering.
+            </Text>
+          </View>
+        );
+      }
       return (
         <View style={styles.heroCard}>
-          <Text style={styles.kicker}>Your Beer Awaits</Text>
-          {isBeforeStart ? <Text style={styles.countdown}>{getCountdownText(now)}</Text> : null}
+          <Text style={styles.kicker}>Hallowed Hop Society</Text>
           <Text style={styles.bodyText}>
             {isComplete
-              ? 'The 2026 calendar is complete. Use The Calendar to revisit the revealed beers.'
-              : `Today\u2019s beer becomes the center ritual when ${BEER_CALENDAR_MONTH_NAME} ${BEER_CALENDAR_YEAR} begins. Until then, the circle is gathering and the taps remain under wraps.`}
+              ? 'The 2026 ritual is complete. All thirty-one beers are now visible in The Calendar.'
+              : 'Your daily beer will appear here when October 2026 begins.'}
           </Text>
         </View>
       );
