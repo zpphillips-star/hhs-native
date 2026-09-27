@@ -43,6 +43,7 @@ const BEER_CALENDAR_YEAR = 2026;
 const BEER_CALENDAR_MONTH_INDEX = 9; // October
 const BEER_CALENDAR_MONTH_NAME = 'October';
 const BEER_CALENDAR_DAYS = 31;
+const HHS_MUG_IMAGE = require('../../../assets/mughhs.webp');
 
 type NativeBeerScreenProps = {
   mode?: 'calendar' | 'yourBeer';
@@ -87,7 +88,13 @@ function getCountdownParts(now: Date) {
   return {
     days: Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24))),
     hours: Math.max(0, Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))),
+    minutes: Math.max(0, Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))),
+    seconds: Math.max(0, Math.floor((diff % (1000 * 60)) / 1000)),
   };
+}
+
+function padCountdown(value: number) {
+  return String(value).padStart(2, '0');
 }
 
 function getCalendarState(now: Date) {
@@ -153,7 +160,7 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
   const [todayWallPosted, setTodayWallPosted] = useState(false);
   const [todayPeekEnabled, setTodayPeekEnabled] = useState(false);
 
-  const now = useMemo(() => getEffectiveNow(), []);
+  const [now, setNow] = useState(() => getEffectiveNow());
   const calendarState = useMemo(() => getCalendarState(now), [now]);
   const { isActiveMonth, isBeforeStart, isComplete, revealedThroughDay, todayDay } = calendarState;
 
@@ -215,6 +222,12 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
   useEffect(() => {
     void loadBeers();
   }, [loadBeers]);
+
+  useEffect(() => {
+    if (HHS_TEST_DATE) return undefined;
+    const interval = setInterval(() => setNow(getEffectiveNow()), 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     void loadSelectedRating(selectedParticipates ? selectedBeer : null, user?.id);
@@ -664,6 +677,60 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
     );
   };
 
+  const renderHomeAbout = () => (
+    <View style={styles.homeAboutBlock}>
+      <Text style={styles.homeAboutText}>
+        As October&apos;s chill creeps in and shadows grow long, a devoted fellowship rises to honor the sacred tradition of the hop.
+      </Text>
+      <Text style={styles.homeAboutText}>
+        <Text style={styles.homeAboutStrong}>The Hallowed Hop Society</Text> is an annual gathering of beer enthusiasts who embark on a solemn (and slightly ridiculous) ritual:{' '}
+        <Text style={styles.homeAboutEmphasis}>31 unique beers in 31 haunted days.</Text> No repeats. No excuses. Just pure, unfiltered reverence for the craft of brewing.
+      </Text>
+      <Text style={styles.homeAboutText}>
+        Each year brings a new theme, a new lineup of brews, and new initiates brave enough to take the oath. From spiced pumpkin ales to bone-chilling stouts, we drink not just for the flavor—but for the fellowship.
+      </Text>
+      <View style={styles.homeQuote}>
+        <Text style={styles.homeQuoteText}>Through ritual we pour, through hops we unite.</Text>
+      </View>
+      <Text style={styles.homeAboutText}>We are a society of the sip, the story, and the sacred pour.</Text>
+      <Text style={styles.homeAboutText}>
+        If you&apos;ve got a taste for adventure (and good beer), your place at the circle awaits.
+      </Text>
+    </View>
+  );
+
+  const renderHomeHeroIntro = () => (
+    <View style={styles.homeHero}>
+      <Text style={styles.homeHeroTitle}>HALLOWED{'\n'}HOP SOCIETY</Text>
+      <Image source={HHS_MUG_IMAGE} style={styles.homeHeroImage} resizeMode="contain" />
+      {renderHomeAbout()}
+    </View>
+  );
+
+  const renderHomeCountdown = () => {
+    const countdown = getCountdownParts(now);
+    const parts = [
+      { value: countdown.days, label: 'Days' },
+      { value: countdown.hours, label: 'Hours' },
+      { value: countdown.minutes, label: 'Minutes' },
+      { value: countdown.seconds, label: 'Seconds' },
+    ];
+
+    return (
+      <View style={styles.homeCountdownSection}>
+        <Text style={styles.homeCountdownKicker}>The ritual begins in</Text>
+        <View style={styles.homeCountdownGrid}>
+          {parts.map((part) => (
+            <View key={part.label} style={styles.homeCountdownItem}>
+              <Text style={styles.homeCountdownNumber}>{padCountdown(part.value)}</Text>
+              <Text style={styles.homeCountdownUnit}>{part.label}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+    );
+  };
+
   const renderCalendarIntro = () => {
     if (isBeforeStart) {
       const countdown = getCountdownParts(now);
@@ -728,32 +795,10 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
 
     if (!isActiveMonth || !todayBeer) {
       if (isBeforeStart) {
-        const countdown = getCountdownParts(now);
         return (
-          <View style={styles.preOctoberSection}>
-            <View style={styles.ritualDivider}>
-              <View style={styles.ritualLine} />
-              <Text style={styles.kicker}>The Ritual Begins Soon</Text>
-              <View style={styles.ritualLine} />
-            </View>
-            <Text style={styles.countdownLabel}>October 1st begins in</Text>
-            <View style={styles.countdownRow}>
-              <Text style={styles.countdownNumber}>{countdown.days}</Text>
-              <Text style={styles.countdownUnit}>days</Text>
-              <Text style={styles.countdownDot}>·</Text>
-              <Text style={styles.countdownNumber}>{countdown.hours}</Text>
-              <Text style={styles.countdownUnit}>hrs</Text>
-            </View>
-            <View style={styles.manifestoCard}>
-              <Text style={styles.manifestoText}>
-                Thirty-one days. Thirty-one beers. Each selection chosen from the finest craft breweries of the
-                Pacific Northwest — north of Marysville, all the way to the border. The deliberation is underway.
-              </Text>
-            </View>
-            <Text style={styles.bodyText}>
-              When October 1st arrives, your daily beer will appear here. Until then, the taps are sealed and the
-              circle is gathering.
-            </Text>
+          <View>
+            {renderHomeHeroIntro()}
+            {renderHomeCountdown()}
           </View>
         );
       }
@@ -1114,6 +1159,93 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     fontSize: 34,
     fontWeight: '700',
+  },
+  homeHero: {
+    paddingBottom: 18,
+    paddingTop: 18,
+  },
+  homeHeroTitle: {
+    ...HHS_TYPOGRAPHY.display,
+    color: COLORS.text,
+    fontSize: 44,
+    fontWeight: '900',
+    letterSpacing: 1.2,
+    lineHeight: 48,
+    marginBottom: 14,
+  },
+  homeHeroImage: {
+    alignSelf: 'flex-end',
+    height: 170,
+    marginBottom: 8,
+    marginLeft: 18,
+    opacity: 0.9,
+    width: '50%',
+  },
+  homeAboutBlock: {
+    gap: 12,
+  },
+  homeAboutText: {
+    ...HHS_TYPOGRAPHY.body,
+    color: COLORS.text,
+    fontSize: 17,
+    lineHeight: 30,
+  },
+  homeAboutStrong: {
+    color: COLORS.text,
+    fontWeight: '700',
+  },
+  homeAboutEmphasis: {
+    color: COLORS.text,
+    fontStyle: 'italic',
+  },
+  homeQuote: {
+    borderLeftColor: COLORS.gold,
+    borderLeftWidth: 3,
+    marginVertical: 8,
+    paddingLeft: 18,
+  },
+  homeQuoteText: {
+    ...HHS_TYPOGRAPHY.body,
+    color: COLORS.text,
+    fontSize: 18,
+    fontWeight: '700',
+    lineHeight: 28,
+  },
+  homeCountdownSection: {
+    alignItems: 'center',
+    paddingBottom: 22,
+    paddingTop: 34,
+  },
+  homeCountdownKicker: {
+    ...HHS_TYPOGRAPHY.kicker,
+    color: COLORS.muted,
+    fontSize: 12,
+    letterSpacing: 3,
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  homeCountdownGrid: {
+    flexDirection: 'row',
+    gap: 14,
+    justifyContent: 'center',
+  },
+  homeCountdownItem: {
+    alignItems: 'center',
+    minWidth: 64,
+  },
+  homeCountdownNumber: {
+    ...HHS_TYPOGRAPHY.display,
+    color: COLORS.gold,
+    fontSize: 40,
+    fontWeight: '700',
+    lineHeight: 44,
+  },
+  homeCountdownUnit: {
+    ...HHS_TYPOGRAPHY.kicker,
+    color: COLORS.muted,
+    fontSize: 10,
+    letterSpacing: 1.4,
+    marginTop: 6,
   },
   preOctoberSection: {
     alignItems: 'center',

@@ -9,7 +9,7 @@
  *   Reaction  = +1 pt   (no timeliness)
  *
  * "Day N timeliness" means the UTC calendar day-of-month of created_at
- * equals beer.day_number for August 2026.
+ * equals beer.day_number for October 2026.
  *
  * Only members with score > 0 appear in the leaderboard.
  * Tied scores are broken alphabetically by display name.
@@ -71,7 +71,7 @@ type ReactionRow = {
 // ─── Scoring constants ────────────────────────────────────────────────────────
 
 const EVENT_YEAR = 2026;
-const EVENT_MONTH = 8; // August (1-indexed)
+const EVENT_MONTH = 10; // October (1-indexed)
 
 const PTS_RATING = 2;
 const PTS_RATING_TIMELY = 1;
@@ -84,7 +84,7 @@ const PTS_REACTION = 1;
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
- * Returns true if `isoDate` falls on August `dayNumber`, 2026 (UTC calendar).
+ * Returns true if `isoDate` falls on October `dayNumber`, 2026 (UTC calendar).
  */
 function isTimely(isoDate: string, dayNumber: number | null): boolean {
   if (dayNumber == null) return false;
