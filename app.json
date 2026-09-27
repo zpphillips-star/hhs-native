@@ -13,7 +13,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "buildNumber": "87",
+      "buildNumber": "88",
       "bundleIdentifier": "com.zplotindustries.hallowedhopsociety",
       "infoPlist": {
         "LSApplicationQueriesSchemes": [
@@ -27,7 +27,7 @@
         "backgroundColor": "#191726"
       },
       "package": "com.zplotindustries.hallowedhopsociety",
-      "versionCode": 87,
+      "versionCode": 88,
       "permissions": [
         "INTERNET",
         "POST_NOTIFICATIONS",
