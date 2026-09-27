@@ -173,6 +173,9 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
                 style={[styles.tabButton, tab.center && styles.centerTabButton, active && styles.tabButtonActive]}
                 onPress={() => handleSelectTab(tab)}
                 activeOpacity={0.8}
+                accessibilityRole="tab"
+                accessibilityLabel={tab.center ? 'Your Beer' : tab.label.replace('\n', ' ')}
+                accessibilityState={{ selected: active }}
               >
                 {tab.center ? (
                   <View style={[styles.logoCircle, active && styles.logoCircleActive]}>
@@ -207,19 +210,43 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
                   <Text style={styles.menuTitle}>Membership and Notifications</Text>
                   <Text style={styles.menuBody}>Choose a Society action.</Text>
 
-                  <TouchableOpacity style={styles.menuItem} onPress={openSettingsInfo} activeOpacity={0.78}>
+                  <TouchableOpacity
+                    style={styles.menuItem}
+                    onPress={openSettingsInfo}
+                    activeOpacity={0.78}
+                    accessibilityRole="button"
+                    accessibilityLabel="Membership and Notifications"
+                  >
                     <Text style={styles.menuItemText}>Membership and Notifications</Text>
                     <Text style={styles.menuChevron}>›</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.menuItem} onPress={openAboutHhs} activeOpacity={0.78}>
+                  <TouchableOpacity
+                    style={styles.menuItem}
+                    onPress={openAboutHhs}
+                    activeOpacity={0.78}
+                    accessibilityRole="button"
+                    accessibilityLabel="About HHS"
+                  >
                     <Text style={styles.menuItemText}>About HHS</Text>
                     <Text style={styles.menuChevron}>›</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.menuItem} onPress={openFeedback} activeOpacity={0.78}>
+                  <TouchableOpacity
+                    style={styles.menuItem}
+                    onPress={openFeedback}
+                    activeOpacity={0.78}
+                    accessibilityRole="button"
+                    accessibilityLabel="Feedback"
+                  >
                     <Text style={styles.menuItemText}>Feedback</Text>
                     <Text style={styles.menuChevron}>›</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.menuItem} onPress={openAuth} activeOpacity={0.78}>
+                  <TouchableOpacity
+                    style={styles.menuItem}
+                    onPress={openAuth}
+                    activeOpacity={0.78}
+                    accessibilityRole="button"
+                    accessibilityLabel="Sign in or out"
+                  >
                     <Text style={styles.menuItemText}>Sign in / out</Text>
                     <Text style={styles.menuChevron}>›</Text>
                   </TouchableOpacity>

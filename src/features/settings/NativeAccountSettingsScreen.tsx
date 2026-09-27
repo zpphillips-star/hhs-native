@@ -19,7 +19,9 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { HHS_WEB_ORIGIN } from '../../config/env';
 import {
   getCurrentPushPermissionStatus,
+  getPushRegistrationSupport,
   isDeviceRegisteredLocally,
+  requestNotificationPermission,
   registerDeviceForPushNotifications,
   unregisterCachedPushToken,
   type PushPermissionStatus,
@@ -145,6 +147,7 @@ export function NativeAccountSettingsScreen({
 
   const displayName = useMemo(() => getDisplayName(profile, user?.email), [profile, user?.email]);
   const normalizedTier = useMemo(() => normalizeMembershipTier(profile?.tier), [profile?.tier]);
+  const pushRegistrationSupport = useMemo(() => getPushRegistrationSupport(), []);
 
   // Mounted guard: prevents async callbacks from calling setState after the
   // component unmounts (e.g. user navigates away while a fetch is in flight).
@@ -163,6 +166,7 @@ export function NativeAccountSettingsScreen({
       setDetailsError(null);
       setPrefError(null);
       setBeerVisibilityError(null);
+      setIsDeviceRegistered(false);
       setPushMessage(null);
       setPushStatus('unknown');
       setLoadingDetails(false);
@@ -274,20 +278,12 @@ export function NativeAccountSettingsScreen({
 
       try {
         if (key === 'daily_beer' && value) {
-          const registration = await registerDeviceForPushNotifications(
-            { id: user.id, email: profile?.email ?? user.email },
-            { requestPermission: true },
-          );
+          const permission = await requestNotificationPermission();
+          setPushStatus(permission.status);
+          setPushMessage(permission.message);
 
-          setPushStatus(registration.status);
-          setPushMessage(registration.message);
-
-          if (!registration.ok) {
-            throw new Error(registration.message);
-          }
-
-          if (registration.registered) {
-            setIsDeviceRegistered(true);
+          if (!permission.ok) {
+            throw new Error(permission.message);
           }
         }
 
@@ -369,7 +365,12 @@ export function NativeAccountSettingsScreen({
 
     if (result.error) {
       setDetailsError(result.error.message);
+      return;
     }
+
+    setIsDeviceRegistered(false);
+    setPushMessage(null);
+    setPushStatus('unknown');
   };
 
   const handleSubmitFeedback = async () => {
@@ -502,7 +503,9 @@ export function NativeAccountSettingsScreen({
     const registrationLabel = pushGranted
       ? isDeviceRegistered
         ? '✓ This device is registered for push notifications.'
-        : 'Device not yet registered — tap the button below.'
+        : pushRegistrationSupport.canRegister
+          ? 'Device not yet registered — tap the button below.'
+          : 'Device registration is unavailable in this build.'
       : null;
 
     return (
@@ -510,14 +513,14 @@ export function NativeAccountSettingsScreen({
         <Text style={styles.sectionKicker}>Notifications</Text>
         <Text style={styles.cardTitle}>Notification Settings</Text>
         <Text style={styles.bodyText}>
-          Daily Beer now asks Android/iPhone notification permission before it turns on and honestly fails if
-          this device cannot register. Social notifications (comments, reactions) are server-sent push alerts
-          and require both system permission and device registration below.
+          Daily Beer Reminder is a local on-device notification. It only needs Android/iPhone notification
+          permission. Social notifications (comments, reactions) are server-sent push alerts and still require
+          both system permission and device registration below.
         </Text>
 
         {/* ── Push device status box ── */}
         <View style={styles.pushStatusBox}>
-          <Text style={styles.infoLabel}>Push Device</Text>
+          <Text style={styles.infoLabel}>Social Push Device</Text>
           <Text style={styles.infoValue}>
             {pushGranted
               ? 'System permission granted'
@@ -532,29 +535,44 @@ export function NativeAccountSettingsScreen({
               {registrationLabel}
             </Text>
           ) : null}
+          {!pushRegistrationSupport.canRegister && pushRegistrationSupport.reason ? (
+            <Text style={styles.warningText}>{pushRegistrationSupport.reason}</Text>
+          ) : null}
           {pushMessage ? <Text style={styles.helperText}>{pushMessage}</Text> : null}
 
           {/* When denied: redirect to system settings (Android) instead of re-requesting */}
           {pushDenied ? (
             <>
               <Text style={styles.warningText}>
-                Push is blocked in system settings. Open your device&apos;s notification settings to
-                re-enable it, then return here and tap &quot;Register This Device&quot;.
+                Notifications are blocked in system settings. Open your device&apos;s app settings to
+                re-enable them, then return here and register this device for social push.
               </Text>
               <TouchableOpacity
                 activeOpacity={0.85}
                 onPress={() => void Linking.openSettings()}
                 style={styles.primaryButton}
+                accessibilityRole="button"
               >
-                <Text style={styles.primaryButtonText}>Open Notification Settings</Text>
+                <Text style={styles.primaryButtonText}>Open App Settings</Text>
               </TouchableOpacity>
             </>
+          ) : !pushRegistrationSupport.canRegister ? (
+            <TouchableOpacity
+              activeOpacity={1}
+              disabled
+              style={[styles.secondaryButton, styles.buttonDisabled]}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: true }}
+            >
+              <Text style={styles.secondaryButtonText}>Social Push Unavailable</Text>
+            </TouchableOpacity>
           ) : (
             <TouchableOpacity
               activeOpacity={0.85}
               disabled={registeringPush}
               onPress={() => void handleRegisterPush()}
               style={[styles.primaryButton, registeringPush && styles.buttonDisabled]}
+              accessibilityRole="button"
             >
               <Text style={styles.primaryButtonText}>
                 {registeringPush
@@ -578,8 +596,8 @@ export function NativeAccountSettingsScreen({
           label="Daily Beer Reminder"
           description={
             pushGranted
-              ? 'Daily 4 PM local reminder. Turning this on also verifies this device can register for native push.'
-              : 'Requests notification permission and device registration before enabling.'
+              ? 'Daily 4 PM local reminder on this device.'
+              : 'Requests notification permission before enabling the local 4 PM reminder.'
           }
           onValueChange={(value) => void handlePreferenceChange('daily_beer', value)}
         />
@@ -590,7 +608,9 @@ export function NativeAccountSettingsScreen({
             <Text style={styles.pushRequiredNoteText}>
               {pushDenied
                 ? '⚠ Social push notifications are disabled until system permission is restored.'
-                : '⚠ Social push notifications require device registration (above). Preferences are saved and will take effect once registered.'}
+                : !pushRegistrationSupport.canRegister
+                  ? '⚠ Social push notifications remain unavailable in this build. Your saved preferences can apply after Firebase-enabled device registration ships.'
+                  : '⚠ Social push notifications require device registration (above). Preferences are saved and will take effect once registered.'}
             </Text>
           </View>
         ) : null}
@@ -711,6 +731,7 @@ export function NativeAccountSettingsScreen({
         disabled={signingOut}
         onPress={() => void handleSignOut()}
         style={[styles.secondaryButton, signingOut && styles.buttonDisabled]}
+        accessibilityRole="button"
       >
         <Text style={styles.secondaryButtonText}>{signingOut ? 'Signing out...' : 'Sign Out'}</Text>
       </TouchableOpacity>

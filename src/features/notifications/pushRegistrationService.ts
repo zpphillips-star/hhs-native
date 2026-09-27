@@ -26,6 +26,11 @@ export type PushRegistrationResult = {
   message: string;
 };
 
+export type PushRegistrationSupport = {
+  canRegister: boolean;
+  reason?: string;
+};
+
 function getPushTokenStorageKey(user: PushRegistrationUser) {
   const userKey = (user.id || user.email || '').toLowerCase();
   return `${PUSH_TOKEN_STORAGE_PREFIX}:${Platform.OS}:${userKey}`;
@@ -66,6 +71,63 @@ async function getGrantedPushPermission(shouldRequestPermission: boolean) {
   if (existingPermission.status === 'granted') return existingPermission;
   if (!shouldRequestPermission) return existingPermission;
   return Notifications.requestPermissionsAsync();
+}
+
+function hasAndroidGoogleServicesConfig() {
+  const androidConfig = (Constants.expoConfig?.android ?? {}) as { googleServicesFile?: unknown };
+  return typeof androidConfig.googleServicesFile === 'string' && androidConfig.googleServicesFile.trim().length > 0;
+}
+
+export function getPushRegistrationSupport(): PushRegistrationSupport {
+  const executionEnvironment = getExecutionEnvironmentName();
+
+  if (executionEnvironment === 'storeClient') {
+    return {
+      canRegister: false,
+      reason: 'Social push registration only works in the installed HHS app build, not Expo Go.',
+    };
+  }
+
+  if (Platform.OS === 'android' && !hasAndroidGoogleServicesConfig()) {
+    return {
+      canRegister: false,
+      reason: 'Android social push is not ready in this build yet. Firebase google-services.json is still missing, so device registration stays disabled until a rebuilt app includes it.',
+    };
+  }
+
+  return { canRegister: true };
+}
+
+export async function requestNotificationPermission(): Promise<{
+  ok: boolean;
+  status: PushPermissionStatus;
+  message: string;
+}> {
+  try {
+    const permission = await getGrantedPushPermission(true);
+    if (permission.status === 'granted') {
+      return {
+        ok: true,
+        status: permission.status,
+        message: 'Notification permission is enabled for this device.',
+      };
+    }
+
+    return {
+      ok: false,
+      status: permission.status,
+      message:
+        permission.status === 'denied'
+          ? 'Notifications are blocked in system settings.'
+          : 'Notification permission has not been granted yet.',
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 'unknown',
+      message: formatPushRegistrationError(error),
+    };
+  }
 }
 
 function getExecutionEnvironmentName() {
@@ -137,6 +199,15 @@ export async function registerDeviceForPushNotifications(
   }
 
   try {
+    const support = getPushRegistrationSupport();
+    if (!support.canRegister) {
+      return {
+        ok: false,
+        status: await getCurrentPushPermissionStatus(),
+        message: support.reason ?? 'Push registration is not available in this build.',
+      };
+    }
+
     const permission = await getGrantedPushPermission(options.requestPermission);
     if (permission.status !== 'granted') {
       return {

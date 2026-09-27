@@ -2,7 +2,7 @@
   "expo": {
     "name": "Hallowed Hop Society",
     "slug": "hhs-native",
-    "version": "1.0.86",
+    "version": "1.0.87",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -13,7 +13,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "buildNumber": "88",
+      "buildNumber": "89",
       "bundleIdentifier": "com.zplotindustries.hallowedhopsociety",
       "infoPlist": {
         "LSApplicationQueriesSchemes": [
@@ -27,12 +27,17 @@
         "backgroundColor": "#191726"
       },
       "package": "com.zplotindustries.hallowedhopsociety",
-      "versionCode": 88,
+      "versionCode": 89,
       "permissions": [
         "INTERNET",
         "POST_NOTIFICATIONS",
         "SCHEDULE_EXACT_ALARM",
         "VIBRATE"
+      ],
+      "blockedPermissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
       ],
       "intentFilters": [
         {
@@ -71,7 +76,7 @@
       "expo-image-picker"
     ],
     "scheme": "hhs",
-    "description": "Hallowed Hop Society â€” 31 unique beers in 31 haunted days.",
+    "description": "Hallowed Hop Society — 31 unique beers in 31 haunted days.",
     "primaryColor": "#191726"
   }
 }
