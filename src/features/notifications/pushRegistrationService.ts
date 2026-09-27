@@ -1,8 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
 import { HHS_WEB_ORIGIN } from '../../config/env';
+import { getAuthenticatedApiHeaders } from '../../lib/nativeApiAuth';
 
 const PUSH_TOKEN_STORAGE_PREFIX = '@hhs:push-token';
 const HHS_EXPO_PROJECT_ID = '7c415298-5d23-4f3d-b818-60a6ba5475a2';
@@ -18,6 +20,7 @@ export type PushRegistrationResult = {
   ok: boolean;
   status: PushPermissionStatus;
   token?: string;
+  provider?: 'expo' | 'fcm';
   registered?: boolean;
   skipped?: boolean;
   message: string;
@@ -25,7 +28,7 @@ export type PushRegistrationResult = {
 
 function getPushTokenStorageKey(user: PushRegistrationUser) {
   const userKey = (user.id || user.email || '').toLowerCase();
-  return `${PUSH_TOKEN_STORAGE_PREFIX}:${userKey}`;
+  return `${PUSH_TOKEN_STORAGE_PREFIX}:${Platform.OS}:${userKey}`;
 }
 
 function requirePushUser(user: PushRegistrationUser) {
@@ -65,6 +68,59 @@ async function getGrantedPushPermission(shouldRequestPermission: boolean) {
   return Notifications.requestPermissionsAsync();
 }
 
+function getExecutionEnvironmentName() {
+  const runtime = (Constants as { executionEnvironment?: unknown }).executionEnvironment;
+  return typeof runtime === 'string' ? runtime : '';
+}
+
+function formatPushRegistrationError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? 'Push registration failed.');
+  const normalized = message.toLowerCase();
+  const executionEnvironment = getExecutionEnvironmentName();
+
+  if (executionEnvironment === 'storeClient') {
+    return 'Push registration only works in the installed HHS app build, not Expo Go.';
+  }
+
+  if (
+    Platform.OS === 'android' &&
+    (
+      normalized.includes('firebaseapp') ||
+      normalized.includes('default firebase') ||
+      normalized.includes('messaging') ||
+      normalized.includes('google-services')
+    )
+  ) {
+    return 'Android push is not fully configured in this build yet. Add a valid google-services.json / Firebase setup and rebuild the app.';
+  }
+
+  if (normalized.includes('projectid')) {
+    return 'Expo push project configuration is missing or invalid for this build.';
+  }
+
+  return message || 'Push registration failed.';
+}
+
+async function getPushTokenForCurrentPlatform(): Promise<{ token: string; provider: 'expo' | 'fcm' }> {
+  if (Platform.OS === 'android') {
+    const tokenData = await Notifications.getDevicePushTokenAsync();
+    const token = typeof tokenData.data === 'string' ? tokenData.data.trim() : '';
+    if (!token) {
+      throw new Error('Firebase Cloud Messaging did not return a device token for this Android device.');
+    }
+    return { token, provider: 'fcm' };
+  }
+
+  const tokenData = await Notifications.getExpoPushTokenAsync({
+    projectId: HHS_EXPO_PROJECT_ID,
+  });
+  const token = tokenData.data?.trim();
+  if (!token) {
+    throw new Error('Expo did not return a push token for this device.');
+  }
+  return { token, provider: 'expo' };
+}
+
 export async function registerDeviceForPushNotifications(
   user: PushRegistrationUser,
   options: { requestPermission: boolean } = { requestPermission: false },
@@ -93,39 +149,34 @@ export async function registerDeviceForPushNotifications(
       };
     }
 
-    const tokenData = await Notifications.getExpoPushTokenAsync({
-      projectId: HHS_EXPO_PROJECT_ID,
-    });
-    const token = tokenData.data;
+    const authHeaders = await getAuthenticatedApiHeaders(pushUser.id);
+    const { token, provider } = await getPushTokenForCurrentPlatform();
     if (!token) {
       return {
         ok: false,
         status: permission.status,
-        message: 'Expo did not return a push token for this device.',
+        provider,
+        message: 'No push token was returned for this device.',
       };
     }
 
     const cacheKey = getPushTokenStorageKey(pushUser);
     const cachedToken = await AsyncStorage.getItem(cacheKey).catch(() => null);
-    if (cachedToken === token) {
-      return {
-        ok: true,
-        status: permission.status,
-        token,
-        registered: true,
-        skipped: true,
-        message: 'This device is already registered for push notifications.',
-      };
-    }
 
     const response = await fetch(`${HHS_WEB_ORIGIN}/api/push-token`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+      },
       body: JSON.stringify({
         user_id: pushUser.id,
         email: pushUser.email,
         token,
         platform: Platform.OS,
+        token_provider: provider,
+        token_type: provider === 'fcm' ? 'native' : 'expo',
+        previous_token: cachedToken && cachedToken !== token ? cachedToken : undefined,
       }),
     });
 
@@ -135,6 +186,7 @@ export async function registerDeviceForPushNotifications(
         ok: false,
         status: permission.status,
         token,
+        provider,
         registered: false,
         message: text || `Push token registration failed (${response.status}).`,
       };
@@ -145,14 +197,19 @@ export async function registerDeviceForPushNotifications(
       ok: true,
       status: permission.status,
       token,
+      provider,
       registered: true,
-      message: 'This device is registered for push notifications.',
+      skipped: cachedToken === token,
+      message:
+        provider === 'fcm'
+          ? 'This Android device is registered directly with Firebase Cloud Messaging.'
+          : 'This device is registered for push notifications.',
     };
   } catch (error) {
     return {
       ok: false,
       status: 'unknown',
-      message: error instanceof Error ? error.message : 'Push registration failed.',
+      message: formatPushRegistrationError(error),
     };
   }
 }
@@ -195,9 +252,13 @@ export async function unregisterCachedPushToken(user: PushRegistrationUser): Pro
   }
 
   try {
+    const authHeaders = await getAuthenticatedApiHeaders(pushUser.id);
     const response = await fetch(`${HHS_WEB_ORIGIN}/api/push-token`, {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+      },
       body: JSON.stringify({ user_id: pushUser.id, token: cachedToken }),
     });
 

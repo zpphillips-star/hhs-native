@@ -1,4 +1,5 @@
 import { HHS_WEB_ORIGIN } from '../../config/env';
+import { getAuthenticatedApiHeaders } from '../../lib/nativeApiAuth';
 import { supabase } from '../../lib/supabase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
@@ -153,9 +154,13 @@ export async function fetchNotificationPreferences(userId: string): Promise<Noti
   const timer = setTimeout(() => controller.abort(), 7000);
 
   try {
+    const authHeaders = await getAuthenticatedApiHeaders(userId);
     const response = await fetch(
       `${HHS_WEB_ORIGIN}/api/notification-preferences?user_id=${encodeURIComponent(userId)}`,
-      { signal: controller.signal },
+      {
+        headers: authHeaders,
+        signal: controller.signal,
+      },
     );
 
     if (!response.ok) {
@@ -199,18 +204,19 @@ export async function saveNotificationPreferences(
   email: string | null | undefined,
   prefs: NotificationPreferences,
 ): Promise<void> {
-  // Always persist locally first — keeps optimistic update durable across restarts.
-  await saveLocalNotificationPreferences(userId, prefs);
-
   // Use a 7-second timeout so a hanging server never keeps prefSavingKey set and
   // freezes all toggles in a disabled state for the rest of the session.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 7000);
 
   try {
+    const authHeaders = await getAuthenticatedApiHeaders(userId);
     const response = await fetch(`${HHS_WEB_ORIGIN}/api/notification-preferences`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+      },
       body: JSON.stringify({
         user_id: userId,
         email: email ?? undefined,
@@ -222,7 +228,7 @@ export async function saveNotificationPreferences(
     if (!response.ok) {
       const text = await response.text();
       console.warn('[HHS settings] notification preferences backend save failed:', response.status, text);
-      return;
+      throw new Error(text || `Could not save notification preferences (${response.status}).`);
     }
 
     const json = (await response.json()) as {
@@ -232,12 +238,18 @@ export async function saveNotificationPreferences(
 
     if (!json.ok) {
       console.warn('[HHS settings] notification preferences backend save was not successful:', json.error);
+      throw new Error(json.error || 'Could not save notification preferences.');
     }
+
+    await saveLocalNotificationPreferences(userId, prefs);
   } catch (err) {
     if (controller.signal.aborted) {
       console.warn('[HHS settings] notification preferences backend save timed out; preference kept in local cache.');
+      throw new Error('Saving notification preferences timed out. Please try again.');
     } else {
       console.warn('[HHS settings] notification preferences backend save error:', err instanceof Error ? err.message : err);
+      if (err instanceof Error) throw err;
+      throw new Error('Could not save notification preferences.');
     }
   } finally {
     clearTimeout(timer);

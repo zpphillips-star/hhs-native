@@ -271,13 +271,31 @@ export function NativeAccountSettingsScreen({
       const nextPrefs = applyNotificationPreferenceToggle(prefs, key, value);
       setPrefSavingKey(key);
       setPrefError(null);
-      setPrefs(nextPrefs);
 
       try {
+        if (key === 'daily_beer' && value) {
+          const registration = await registerDeviceForPushNotifications(
+            { id: user.id, email: profile?.email ?? user.email },
+            { requestPermission: true },
+          );
+
+          setPushStatus(registration.status);
+          setPushMessage(registration.message);
+
+          if (!registration.ok) {
+            throw new Error(registration.message);
+          }
+
+          if (registration.registered) {
+            setIsDeviceRegistered(true);
+          }
+        }
+
+        setPrefs(nextPrefs);
         await saveNotificationPreferences(user.id, profile?.email ?? user.email, nextPrefs);
         // Sync daily local reminder if the daily_beer toggle changed.
         if (key === 'daily_beer') {
-          void syncDailyBeerReminder(value);
+          await syncDailyBeerReminder(value);
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Could not save notification preferences.';
@@ -492,9 +510,9 @@ export function NativeAccountSettingsScreen({
         <Text style={styles.sectionKicker}>Notifications</Text>
         <Text style={styles.cardTitle}>Notification Settings</Text>
         <Text style={styles.bodyText}>
-          Daily Beer is a local 4 PM device reminder — it works without push registration once system
-          permission is granted. Social notifications (comments, reactions) are server-sent push alerts
-          and require both system permission AND device registration below.
+          Daily Beer now asks Android/iPhone notification permission before it turns on and honestly fails if
+          this device cannot register. Social notifications (comments, reactions) are server-sent push alerts
+          and require both system permission and device registration below.
         </Text>
 
         {/* ── Push device status box ── */}
@@ -560,8 +578,8 @@ export function NativeAccountSettingsScreen({
           label="Daily Beer Reminder"
           description={
             pushGranted
-              ? 'Daily 4 PM local reminder when your beer of the day drops.'
-              : 'Requires system notification permission (see above).'
+              ? 'Daily 4 PM local reminder. Turning this on also verifies this device can register for native push.'
+              : 'Requests notification permission and device registration before enabling.'
           }
           onValueChange={(value) => void handlePreferenceChange('daily_beer', value)}
         />
