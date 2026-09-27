@@ -879,7 +879,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.body,
     color: '#fff',
     fontSize: 12,
-    fontWeight: '700',
   },
   composerActions: {
     alignItems: 'center',
@@ -922,7 +921,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.button,
     color: HHS_COLORS.background,
     fontSize: 12,
-    fontWeight: '700',
   },
   dividerRow: {
     alignItems: 'center',
@@ -1004,7 +1002,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.button,
     color: HHS_COLORS.background,
     fontSize: 12,
-    fontWeight: '700',
   },
   emptyState: {
     alignItems: 'center',
@@ -1056,7 +1053,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.body,
     color: HHS_COLORS.gold,
     fontSize: 15,
-    fontWeight: '700',
   },
   postTimestamp: {
     ...HHS_TYPOGRAPHY.body,
@@ -1159,7 +1155,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.body,
     color: HHS_COLORS.gold,
     fontSize: 13,
-    fontWeight: '700',
   },
   commentTimestamp: {
     ...HHS_TYPOGRAPHY.body,
@@ -1208,7 +1203,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.body,
     color: HHS_COLORS.background,
     fontSize: 12,
-    fontWeight: '700',
   },
   loadMoreButton: {
     alignItems: 'center',
@@ -1263,6 +1257,5 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.body,
     color: '#fff',
     fontSize: 16,
-    fontWeight: '700',
   },
 });

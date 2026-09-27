@@ -1474,7 +1474,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.gold,
     fontSize: 16,
-    fontWeight: '800',
     letterSpacing: 1.5,
     textTransform: 'uppercase',
   },
@@ -1489,7 +1488,6 @@ const styles = StyleSheet.create({
   menuCloseText: {
     color: COLORS.muted,
     fontSize: 15,
-    fontWeight: '600',
   },
   menuUserBadge: {
     marginHorizontal: 20,
@@ -1505,7 +1503,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.body,
     color: COLORS.text,
     fontSize: 15,
-    fontWeight: '700',
   },
   menuUserEmail: {
     ...HHS_TYPOGRAPHY.body,
@@ -1533,7 +1530,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.body,
     color: COLORS.text,
     fontSize: 16,
-    fontWeight: '600',
   },
   menuItemSub: {
     ...HHS_TYPOGRAPHY.body,
@@ -1544,7 +1540,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 22,
-    fontWeight: '300',
   },
   menuVersionFooter: {
     ...HHS_TYPOGRAPHY.body,
@@ -1589,7 +1584,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.kicker,
     color: COLORS.gold,
     fontSize: 11,
-    fontWeight: '800',
     letterSpacing: 1.8,
     textTransform: 'uppercase',
     marginBottom: 10,
@@ -1614,7 +1608,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.body,
     color: COLORS.text,
     fontSize: 15,
-    fontWeight: '600',
   },
   settingsRowSub: {
     ...HHS_TYPOGRAPHY.body,
@@ -1678,7 +1671,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.gold,
     fontSize: 24,
-    fontWeight: '700',
     letterSpacing: 1,
     marginBottom: 12,
     textAlign: 'center',
@@ -1702,7 +1694,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.button,
     color: COLORS.background,
     fontSize: 15,
-    fontWeight: '800',
     letterSpacing: 1.2,
     textTransform: 'uppercase',
   },
@@ -1730,7 +1721,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.kicker,
     color: COLORS.gold,
     fontSize: 13,
-    fontWeight: '800',
     letterSpacing: 1.7,
     textAlign: 'center',
     textTransform: 'uppercase',
@@ -1739,7 +1729,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
     fontSize: 28,
-    fontWeight: '800',
     letterSpacing: 0.4,
     textAlign: 'center',
   },
@@ -1770,7 +1759,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.gold,
     fontSize: 22,
-    fontWeight: '800',
     lineHeight: 28,
     textAlign: 'center',
   },
@@ -1785,7 +1773,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.button,
     color: COLORS.background,
     fontSize: 15,
-    fontWeight: '900',
     letterSpacing: 1.2,
     textTransform: 'uppercase',
   },
@@ -1804,7 +1791,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.button,
     color: COLORS.text,
     fontSize: 14,
-    fontWeight: '800',
     letterSpacing: 1,
     textTransform: 'uppercase',
   },
@@ -1826,12 +1812,10 @@ const styles = StyleSheet.create({
     flex: 1,
     color: COLORS.text,
     fontSize: 19,
-    fontWeight: '800',
   },
   packageAmount: {
     color: COLORS.gold,
     fontSize: 20,
-    fontWeight: '900',
   },
   packageDetails: {
     color: COLORS.muted,
@@ -1849,7 +1833,6 @@ const styles = StyleSheet.create({
   paymentAmount: {
     color: COLORS.gold,
     fontSize: 30,
-    fontWeight: '900',
     textAlign: 'right',
   },
 });

@@ -1,4 +1,4 @@
-﻿import { StatusBar } from 'expo-status-bar';
+import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -1158,7 +1158,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
     fontSize: 34,
-    fontWeight: '700',
   },
   homeHero: {
     paddingBottom: 18,
@@ -1168,7 +1167,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
     fontSize: 44,
-    fontWeight: '900',
     letterSpacing: 1.2,
     lineHeight: 48,
     marginBottom: 14,
@@ -1192,11 +1190,9 @@ const styles = StyleSheet.create({
   },
   homeAboutStrong: {
     color: COLORS.text,
-    fontWeight: '700',
   },
   homeAboutEmphasis: {
     color: COLORS.text,
-    fontStyle: 'italic',
   },
   homeQuote: {
     borderLeftColor: COLORS.gold,
@@ -1208,7 +1204,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.body,
     color: COLORS.text,
     fontSize: 18,
-    fontWeight: '700',
     lineHeight: 28,
   },
   homeCountdownSection: {
@@ -1237,7 +1232,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.gold,
     fontSize: 40,
-    fontWeight: '700',
     lineHeight: 44,
   },
   homeCountdownUnit: {
@@ -1270,7 +1264,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.kicker,
     color: COLORS.muted,
     fontSize: 11,
-    fontWeight: '700',
     letterSpacing: 3,
     marginBottom: 10,
     textAlign: 'center',
@@ -1316,7 +1309,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 16,
-    fontStyle: 'italic',
     lineHeight: 29,
     textAlign: 'center',
   },
@@ -1345,7 +1337,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.gold,
     fontSize: 18,
-    fontWeight: '700',
     marginBottom: 8,
   },
   errorText: {
@@ -1366,7 +1357,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.button,
     color: COLORS.background,
     fontSize: 13,
-    fontWeight: '700',
   },
   messageCard: {
     backgroundColor: COLORS.card,
@@ -1379,7 +1369,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 15,
-    fontStyle: 'italic',
     lineHeight: 22,
     textAlign: 'center',
   },
@@ -1387,7 +1376,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
     fontSize: 22,
-    fontWeight: '700',
     marginBottom: 10,
     textAlign: 'center',
   },
@@ -1403,7 +1391,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.button,
     color: COLORS.background,
     fontSize: 12,
-    fontWeight: '800',
     letterSpacing: 1.2,
     textAlign: 'center',
     textTransform: 'uppercase',
@@ -1463,7 +1450,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
     fontSize: 31,
-    fontWeight: '700',
     lineHeight: 36,
     marginBottom: 6,
   },
@@ -1504,7 +1490,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
     fontSize: 16,
-    fontWeight: '700',
     marginBottom: 6,
   },
   placeholderActionText: {
@@ -1645,7 +1630,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 14,
-    fontStyle: 'italic',
   },
   todayBadge: {
     backgroundColor: COLORS.gold,
@@ -1760,7 +1744,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     color: COLORS.muted,
     fontSize: 13,
-    fontStyle: 'italic',
     lineHeight: 20,
     marginBottom: 14,
     padding: 12,
@@ -1828,7 +1811,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.body,
     color: COLORS.gold,
     fontSize: 13,
-    fontWeight: '700',
     lineHeight: 19,
     marginTop: 10,
   },
@@ -1862,7 +1844,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.button,
     color: COLORS.background,
     fontSize: 13,
-    fontWeight: '700',
   },
   dailyActionCard: {
     backgroundColor: COLORS.cardAlt,
@@ -1875,7 +1856,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
     fontSize: 16,
-    fontWeight: '700',
     marginBottom: 6,
   },
   dailyActionText: {
@@ -1934,7 +1914,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.button,
     color: COLORS.background,
     fontSize: 13,
-    fontWeight: '700',
   },
   wallSecondaryButton: {
     borderColor: COLORS.border,
@@ -1947,7 +1926,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.button,
     color: COLORS.gold,
     fontSize: 12,
-    fontWeight: '700',
   },
   wallButtonDisabled: {
     opacity: 0.48,

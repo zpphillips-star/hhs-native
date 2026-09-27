@@ -483,7 +483,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: HHS_COLORS.text,
     fontSize: 26,
-    fontWeight: '700',
     textAlign: 'center',
   },
   subheading: {
@@ -519,7 +518,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.body,
     color: HHS_COLORS.muted,
     fontSize: 14,
-    fontWeight: '600',
   },
   tabPillTextActive: {
     color: HHS_COLORS.gold,
@@ -550,7 +548,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: HHS_COLORS.text,
     fontSize: 20,
-    fontWeight: '700',
     marginBottom: 10,
     textAlign: 'center',
   },
@@ -572,7 +569,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.body,
     color: HHS_COLORS.danger,
     fontSize: 16,
-    fontWeight: '600',
     marginBottom: 4,
     textAlign: 'center',
   },
@@ -603,7 +599,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.button,
     color: HHS_COLORS.background,
     fontSize: 15,
-    fontWeight: '700',
   },
 
   // Leaderboard
@@ -658,7 +653,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: HHS_COLORS.muted,
     fontSize: 15,
-    fontWeight: '700',
     textAlign: 'center',
   },
   rankNumberFirst: {
@@ -672,7 +666,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: HHS_COLORS.text,
     fontSize: 16,
-    fontWeight: '700',
   },
   beerNameFirst: {
     color: HHS_COLORS.goldLight,
@@ -713,7 +706,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: HHS_COLORS.gold,
     fontSize: 22,
-    fontWeight: '700',
     lineHeight: 26,
     textAlign: 'center',
   },

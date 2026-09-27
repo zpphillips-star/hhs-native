@@ -11,7 +11,9 @@ import { NativeRankingsScreen } from '../features/rankings/NativeRankingsScreen'
 import { NativeAccountSettingsScreen } from '../features/settings/NativeAccountSettingsScreen';
 import { NativeWallBeerContext, NativeWallScreen } from '../features/wall/NativeWallScreen';
 import { syncDailyBeerReminderOnStartup } from '../features/notifications/dailyBeerReminderService';
-import { HHS_COLORS, HHS_STYLES, HHS_TYPOGRAPHY } from '../theme/hhsTheme';
+import { configureHhsNativeTypography, HHS_COLORS, HHS_STYLES, HHS_TYPOGRAPHY } from '../theme/hhsTheme';
+
+configureHhsNativeTypography();
 
 type NativeTabId = 'calendar' | 'wall' | 'yourBeer' | 'rankings' | 'settings';
 type NativeContentMode = NativeTabId | 'auth' | 'settingsPage' | 'aboutHhs' | 'feedback';
@@ -280,7 +282,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.body,
     color: HHS_COLORS.muted,
     fontSize: 10,
-    fontWeight: '600',
     lineHeight: 12,
     textAlign: 'center',
   },
@@ -373,7 +374,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: HHS_COLORS.text,
     fontSize: 28,
-    fontWeight: '700',
     textAlign: 'center',
   },
   menuBody: {
@@ -434,7 +434,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: HHS_COLORS.text,
     fontSize: 28,
-    fontWeight: '700',
     marginBottom: 14,
     textAlign: 'center',
   },

@@ -971,7 +971,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.kicker,
     color: COLORS.gold,
     fontSize: 11,
-    fontWeight: '700',
     letterSpacing: 2.4,
     marginBottom: 4,
     textTransform: 'uppercase',
@@ -980,7 +979,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
     fontSize: 34,
-    fontWeight: '700',
   },
   loadingCard: {
     alignItems: 'center',
@@ -1009,7 +1007,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.gold,
     fontSize: 18,
-    fontWeight: '700',
     marginBottom: 8,
   },
   errorText: {
@@ -1030,7 +1027,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.button,
     color: COLORS.background,
     fontSize: 13,
-    fontWeight: '700',
   },
   card: {
     backgroundColor: COLORS.card,
@@ -1045,7 +1041,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.kicker,
     color: COLORS.gold,
     fontSize: 11,
-    fontWeight: '700',
     letterSpacing: 2,
     textTransform: 'uppercase',
   },
@@ -1053,7 +1048,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
     fontSize: 24,
-    fontWeight: '700',
   },
   bodyText: {
     ...HHS_TYPOGRAPHY.body,
@@ -1065,12 +1059,10 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 13,
-    fontStyle: 'italic',
     lineHeight: 20,
   },
   helperTextSuccess: {
     color: '#8fd48f',
-    fontStyle: 'normal',
   },
   pushRequiredNote: {
     backgroundColor: 'rgba(200, 150, 43, 0.08)',
@@ -1102,8 +1094,6 @@ const styles = StyleSheet.create({
     borderLeftWidth: 3,
     color: COLORS.text,
     fontSize: 15,
-    fontStyle: 'italic',
-    fontWeight: '700',
     lineHeight: 23,
     paddingLeft: 14,
   },
@@ -1155,7 +1145,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
     fontSize: 20,
-    fontWeight: '700',
     letterSpacing: 1.8,
     textAlign: 'center',
     textTransform: 'uppercase',
@@ -1171,7 +1160,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.button,
     color: COLORS.background,
     fontSize: 13,
-    fontWeight: '800',
     letterSpacing: 1.6,
     textTransform: 'uppercase',
   },
@@ -1187,7 +1175,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.button,
     color: COLORS.gold,
     fontSize: 12,
-    fontWeight: '800',
     letterSpacing: 1.4,
     textTransform: 'uppercase',
   },
@@ -1208,7 +1195,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.kicker,
     color: COLORS.gold,
     fontSize: 10,
-    fontWeight: '700',
     letterSpacing: 1.8,
     marginBottom: 5,
     textTransform: 'uppercase',
@@ -1239,7 +1225,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
     fontSize: 15,
-    fontWeight: '700',
     marginBottom: 4,
   },
   preferenceDescription: {
@@ -1252,7 +1237,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.body,
     color: COLORS.gold,
     fontSize: 13,
-    fontWeight: '700',
     textAlign: 'center',
   },
   footerNote: {
@@ -1267,7 +1251,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.kicker,
     color: COLORS.gold,
     fontSize: 11,
-    fontWeight: '700',
     letterSpacing: 2.5,
     marginBottom: 10,
     textAlign: 'center',
@@ -1285,7 +1268,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.gold,
     fontSize: 48,
-    fontWeight: '900',
     letterSpacing: 2.5,
     lineHeight: 54,
     marginTop: 6,
@@ -1340,8 +1322,6 @@ const styles = StyleSheet.create({
   },
   aboutBodyEmphasis: {
     color: COLORS.gold,
-    fontStyle: 'italic',
-    fontWeight: '700',
   },
   aboutCountdownRow: {
     flexDirection: 'row',
@@ -1356,7 +1336,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.gold,
     fontSize: 34,
-    fontWeight: '700',
     lineHeight: 38,
   },
   aboutCountdownLabel: {
@@ -1376,6 +1355,5 @@ const styles = StyleSheet.create({
   },
   aboutBodyStrong: {
     color: COLORS.text,
-    fontWeight: '700',
   },
 });

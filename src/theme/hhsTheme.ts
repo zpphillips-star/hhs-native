@@ -1,3 +1,5 @@
+import { Text, TextInput, type TextStyle } from 'react-native';
+
 export const HHS_COLORS = {
   background: '#191726',
   card: '#201d30',
@@ -16,6 +18,38 @@ export const HHS_COLORS = {
 // Matches the authoritative web app's Google Font family.
 // Loaded by NativeAppShell through @expo-google-fonts/modern-antiqua.
 export const HHS_FONT_FAMILY = 'ModernAntiqua_400Regular';
+
+const HHS_NATIVE_TEXT_DEFAULTS: TextStyle = {
+  fontFamily: HHS_FONT_FAMILY,
+};
+
+type BrandableTextComponent = {
+  defaultProps?: {
+    style?: TextStyle | TextStyle[];
+    [key: string]: unknown;
+  };
+};
+
+let hhsTypographyDefaultsRegistered = false;
+
+function withBrandFont(style?: TextStyle | TextStyle[]) {
+  if (!style) return HHS_NATIVE_TEXT_DEFAULTS;
+  return Array.isArray(style) ? [HHS_NATIVE_TEXT_DEFAULTS, ...style] : [HHS_NATIVE_TEXT_DEFAULTS, style];
+}
+
+export function configureHhsNativeTypography() {
+  if (hhsTypographyDefaultsRegistered) return;
+  hhsTypographyDefaultsRegistered = true;
+
+  const text = Text as unknown as BrandableTextComponent;
+  text.defaultProps = text.defaultProps ?? {};
+  text.defaultProps.style = withBrandFont(text.defaultProps.style);
+
+  const textInput = TextInput as unknown as BrandableTextComponent;
+  textInput.defaultProps = textInput.defaultProps ?? {};
+  textInput.defaultProps.style = withBrandFont(textInput.defaultProps.style);
+  textInput.defaultProps.placeholderTextColor = HHS_COLORS.muted;
+}
 
 export const HHS_TYPOGRAPHY = {
   body: {

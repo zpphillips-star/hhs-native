@@ -482,7 +482,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
     fontSize: 16,
-    fontWeight: '700',
   },
   suggestButton: {
     backgroundColor: COLORS.gold,
@@ -494,7 +493,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.button,
     color: '#191726',
     fontSize: 11,
-    fontWeight: '700',
   },
 
   // ── Loading / error states ──
@@ -521,7 +519,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
     fontSize: 18,
-    fontWeight: '700',
     textAlign: 'center',
   },
   errorBody: {
@@ -603,7 +600,6 @@ const styles = StyleSheet.create({
   stageLabel: {
     ...HHS_TYPOGRAPHY.kicker,
     fontSize: 12,
-    fontWeight: '700',
   },
   stageBadge: {
     borderRadius: HHS_STYLES.pillRadius,
@@ -613,7 +609,6 @@ const styles = StyleSheet.create({
   stageBadgeText: {
     ...HHS_TYPOGRAPHY.body,
     fontSize: 11,
-    fontWeight: '700',
   },
   stageDescription: {
     ...HHS_TYPOGRAPHY.body,
@@ -660,7 +655,6 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     flex: 1,
     fontSize: 14,
-    fontWeight: '600',
     lineHeight: 20,
   },
   itemDate: {
@@ -726,7 +720,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
     fontSize: 22,
-    fontWeight: '700',
     marginBottom: 6,
     textAlign: 'center',
   },
@@ -781,7 +774,6 @@ const styles = StyleSheet.create({
     ...HHS_TYPOGRAPHY.button,
     color: '#191726',
     fontSize: 14,
-    fontWeight: '700',
   },
   cancelButton: {
     alignItems: 'center',
