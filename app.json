@@ -2,7 +2,7 @@
   "expo": {
     "name": "Hallowed Hop Society",
     "slug": "hhs-native",
-    "version": "1.0.87",
+    "version": "1.0.144",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -13,7 +13,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "buildNumber": "89",
+      "buildNumber": "144",
       "bundleIdentifier": "com.zplotindustries.hallowedhopsociety",
       "infoPlist": {
         "LSApplicationQueriesSchemes": [
@@ -27,7 +27,7 @@
         "backgroundColor": "#191726"
       },
       "package": "com.zplotindustries.hallowedhopsociety",
-      "versionCode": 89,
+      "versionCode": 144,
       "permissions": [
         "INTERNET",
         "POST_NOTIFICATIONS",

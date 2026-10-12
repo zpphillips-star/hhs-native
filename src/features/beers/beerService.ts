@@ -1,5 +1,6 @@
 import { supabase } from '../../lib/supabase';
 import { HHS_WEB_ORIGIN } from '../../config/env';
+import { normalizeWallMedia, type WallMediaItem } from '../wall/wallMediaService';
 import type { Beer, BeerRating, BeerRatingSummary, BeerWallActivity } from './types';
 
 const BEER_LIST_SELECT = [
@@ -134,6 +135,7 @@ type BeerWallPostRow = {
   content: string | null;
   photo_url: string | null;
   created_at: string;
+  wall_media?: WallMediaItem[] | null;
   post_reactions?: { id: string }[] | null;
   post_comments?: { id: string }[] | null;
 };
@@ -143,12 +145,26 @@ export async function fetchBeerWallActivity(beerId: string, limit = 3): Promise<
     throw new Error('Supabase public env is not configured for the native app.');
   }
 
-  const { data: posts, error } = await supabase
+  const mediaResult = await supabase
     .from('posts')
-    .select('id,user_id,content,photo_url,created_at,post_reactions(id),post_comments(id)')
+    .select('id,user_id,content,photo_url,created_at,wall_media(*),post_reactions(id),post_comments(id)')
     .eq('beer_id', beerId)
     .order('created_at', { ascending: false })
     .limit(limit);
+  let posts = mediaResult.data as unknown[] | null;
+  let error = mediaResult.error;
+
+  if (error && /wall_media|relationship|schema cache|foreign key/i.test(error.message)) {
+    console.warn('[HHS native beer] wall_media relation unavailable; using legacy post media:', error.message);
+    const legacyResult = await supabase
+      .from('posts')
+      .select('id,user_id,content,photo_url,created_at,post_reactions(id),post_comments(id)')
+      .eq('beer_id', beerId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    posts = legacyResult.data as unknown[] | null;
+    error = legacyResult.error;
+  }
 
   if (error) throw error;
 
@@ -167,10 +183,11 @@ export async function fetchBeerWallActivity(beerId: string, limit = 3): Promise<
 
   return rows.map((post) => {
     const profile = profileMap[post.user_id];
+    const firstMedia = normalizeWallMedia(post.wall_media, post.photo_url)[0];
     return {
       id: post.id,
       content: post.content ?? '',
-      photo_url: post.photo_url,
+      photo_url: firstMedia?.public_url ?? post.photo_url,
       created_at: post.created_at,
       author: profile?.display_name || profile?.username || 'Member',
       reactionCount: post.post_reactions?.length ?? 0,

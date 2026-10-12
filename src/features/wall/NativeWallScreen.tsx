@@ -21,9 +21,17 @@ import { HHS_WEB_ORIGIN, isSupabaseEnvConfigured } from '../../config/env';
 import { useAuth } from '../auth/AuthProvider';
 import { supabase } from '../../lib/supabase';
 import { HHS_COLORS, HHS_STYLES, HHS_TYPOGRAPHY } from '../../theme/hhsTheme';
+import {
+  assertAllowedWallMedia,
+  insertWallMediaRows,
+  normalizeWallMedia,
+  uploadWallMedia,
+  type PickedWallMedia,
+  type UploadedWallMedia,
+  type WallMediaItem,
+} from './wallMediaService';
 
 const PAGE_SIZE = 15;
-const PHOTO_BUCKET = 'post-photos';
 
 const REACTIONS = [
   { key: 'cheers', emoji: '🍺', label: 'Cheers' },
@@ -46,6 +54,7 @@ type WallComment = {
   created_at: string;
   user_id: string;
   profiles: Profile | null;
+  wall_media?: WallMediaItem[] | null;
 };
 
 type WallPost = {
@@ -58,13 +67,9 @@ type WallPost = {
   profiles: Profile | null;
   post_reactions: { id: string; user_id: string; reaction: string }[];
   post_comments: WallComment[];
+  wall_media?: WallMediaItem[] | null;
+  media: WallMediaItem[];
   beers: { name: string; brewery: string; day_number: number | null; style: string | null; abv: number | null } | null;
-};
-
-type PickedPhoto = {
-  uri: string;
-  mimeType: string;
-  fileName: string;
 };
 
 type NativeWallError = {
@@ -104,14 +109,6 @@ function formatCommentTimestamp(value: string) {
   }
 }
 
-function getPhotoExtension(photo: PickedPhoto) {
-  const fromName = photo.fileName.split('.').pop();
-  if (fromName && fromName.length <= 5) return fromName.toLowerCase();
-  if (photo.mimeType.includes('png')) return 'png';
-  if (photo.mimeType.includes('webp')) return 'webp';
-  return 'jpg';
-}
-
 function mergeProfiles(postsData: WallPost[], profileMap: Record<string, Profile>): WallPost[] {
   return postsData.map((post) => ({
     ...post,
@@ -120,7 +117,9 @@ function mergeProfiles(postsData: WallPost[], profileMap: Record<string, Profile
     post_comments: (post.post_comments || []).map((comment) => ({
       ...comment,
       profiles: profileMap[comment.user_id] || { username: 'Member', display_name: null },
+      wall_media: normalizeWallMedia(comment.wall_media, null),
     })),
+    media: normalizeWallMedia(post.wall_media, post.photo_url),
   }));
 }
 
@@ -140,32 +139,30 @@ async function fetchProfilesMap() {
 
 async function fetchWallPost(postId: string) {
   if (!supabase) return null;
-  const [{ data, error }, profileMap] = await Promise.all([
-    supabase
+  const selectWithMedia = '*, wall_media(*), post_reactions(*), post_comments(*, wall_media(*)), beers(name, brewery, day_number, style, abv)';
+  const selectLegacy = '*, post_reactions(*), post_comments(*), beers(name, brewery, day_number, style, abv)';
+  let postResult = await supabase
+    .from('posts')
+    .select(selectWithMedia)
+    .eq('id', postId)
+    .maybeSingle();
+
+  if (postResult.error && /wall_media|relationship|schema cache|foreign key/i.test(postResult.error.message)) {
+    console.warn('[HHS native wall] wall_media relation unavailable; using legacy post media:', postResult.error.message);
+    postResult = await supabase
       .from('posts')
-      .select('*, post_reactions(*), post_comments(*), beers(name, brewery, day_number, style, abv)')
+      .select(selectLegacy)
       .eq('id', postId)
-      .maybeSingle(),
+      .maybeSingle();
+  }
+
+  const [{ data, error }, profileMap] = await Promise.all([
+    Promise.resolve(postResult),
     fetchProfilesMap(),
   ]);
   if (error) throw error;
   if (!data) return null;
   return mergeProfiles([data as WallPost], profileMap)[0];
-}
-
-async function uploadPostPhoto(userId: string, photo: PickedPhoto) {
-  if (!supabase) throw new Error('Supabase is not configured for the native app.');
-  const ext = getPhotoExtension(photo);
-  const path = `${userId}/${Date.now()}.${ext}`;
-  const response = await fetch(photo.uri);
-  const body = await response.arrayBuffer();
-  const { error } = await supabase.storage.from(PHOTO_BUCKET).upload(path, body, {
-    contentType: photo.mimeType,
-    upsert: false,
-  });
-  if (error) throw error;
-  const { data } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
-  return data.publicUrl;
 }
 
 function buildApiUrl(path: string) {
@@ -217,7 +214,7 @@ export function NativeWallScreen({ initialBeerContext = null }: { initialBeerCon
   const [page, setPage] = useState(0);
   const [error, setError] = useState<NativeWallError | null>(null);
   const [composerText, setComposerText] = useState('');
-  const [pickedPhoto, setPickedPhoto] = useState<PickedPhoto | null>(null);
+  const [pickedPhoto, setPickedPhoto] = useState<PickedWallMedia | null>(null);
   const [posting, setPosting] = useState(false);
   const [filterBeerId, setFilterBeerId] = useState<string | null>(initialBeerContext?.id ?? null);
   const [filterBeerLabel, setFilterBeerLabel] = useState(
@@ -257,15 +254,29 @@ export function NativeWallScreen({ initialBeerContext = null }: { initialBeerCon
     try {
       const from = pageIndex * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
+      const selectWithMedia = '*, wall_media(*), post_reactions(*), post_comments(*, wall_media(*)), beers(name, brewery, day_number, style, abv)';
+      const selectLegacy = '*, post_reactions(*), post_comments(*), beers(name, brewery, day_number, style, abv)';
       let query = supabase
         .from('posts')
-        .select('*, post_reactions(*), post_comments(*), beers(name, brewery, day_number, style, abv)')
+        .select(selectWithMedia)
         .order('created_at', { ascending: false })
         .range(from, to);
 
       if (beerId) query = query.eq('beer_id', beerId);
 
-      const [{ data, error: fetchError }, profileMap] = await Promise.all([query, fetchProfilesMap()]);
+      let [{ data, error: fetchError }, profileMap] = await Promise.all([query, fetchProfilesMap()]);
+      if (fetchError && /wall_media|relationship|schema cache|foreign key/i.test(fetchError.message)) {
+        console.warn('[HHS native wall] wall_media relation unavailable; using legacy post media:', fetchError.message);
+        let legacyQuery = supabase
+          .from('posts')
+          .select(selectLegacy)
+          .order('created_at', { ascending: false })
+          .range(from, to);
+        if (beerId) legacyQuery = legacyQuery.eq('beer_id', beerId);
+        const legacyResult = await legacyQuery;
+        data = legacyResult.data;
+        fetchError = legacyResult.error;
+      }
       if (fetchError) throw fetchError;
 
       const incoming = mergeProfiles((data as WallPost[]) || [], profileMap);
@@ -352,11 +363,17 @@ export function NativeWallScreen({ initialBeerContext = null }: { initialBeerCon
 
       if (result.canceled || !result.assets[0]) return;
       const asset = result.assets[0];
-      setPickedPhoto({
+      const media: PickedWallMedia = {
         uri: asset.uri,
         mimeType: asset.mimeType || 'image/jpeg',
         fileName: asset.fileName || `wall-photo-${Date.now()}.jpg`,
-      });
+        byteSize: asset.fileSize ?? null,
+        width: asset.width ?? null,
+        height: asset.height ?? null,
+        durationMs: asset.duration ?? null,
+      };
+      assertAllowedWallMedia([media]);
+      setPickedPhoto(media);
     } catch (pickError) {
       Alert.alert('Photo error', pickError instanceof Error ? pickError.message : 'Could not pick a photo.');
     }
@@ -374,13 +391,22 @@ export function NativeWallScreen({ initialBeerContext = null }: { initialBeerCon
 
     try {
       const content = composerText.trim();
-      const photoUrl = pickedPhoto ? await uploadPostPhoto(user.id, pickedPhoto) : null;
+      const uploadedMedia: UploadedWallMedia[] = pickedPhoto ? [await uploadWallMedia(user.id, pickedPhoto, 0)] : [];
+      const photoUrl = uploadedMedia[0]?.public_url ?? null;
       let postId: string | null = null;
       try {
         postId = await postViaWallApi(user.id, content, photoUrl, filterBeerId);
       } catch (apiError) {
         console.warn('[HHS native wall] post API failed; falling back to Supabase insert:', apiError instanceof Error ? apiError.message : apiError);
         postId = await insertPostDirectly(user.id, content, photoUrl, filterBeerId);
+      }
+
+      if (postId && uploadedMedia.length > 0) {
+        try {
+          await insertWallMediaRows(postId, user.id, uploadedMedia);
+        } catch (mediaError) {
+          console.warn('[HHS native wall] wall_media insert failed; legacy photo_url remains available:', mediaError instanceof Error ? mediaError.message : mediaError);
+        }
       }
 
       clearComposer();
@@ -708,10 +734,25 @@ function PostCard({
 
       {post.content ? <Text style={styles.postContent}>{post.content}</Text> : null}
 
-      {post.photo_url ? (
-        <TouchableOpacity style={styles.photoWrap} onPress={() => onOpenPhoto(post.photo_url!)} activeOpacity={0.88}>
-          <Image source={{ uri: post.photo_url }} style={styles.postPhoto} resizeMode="cover" />
-        </TouchableOpacity>
+      {post.media.length > 0 ? (
+        <View style={styles.mediaStack}>
+          {post.media.map((item, index) => (
+            item.media_kind === 'video' ? (
+              <View key={`${item.public_url}-${index}`} style={styles.videoPlaceholder}>
+                <Text style={styles.videoPlaceholderText}>🎥 Video attachment</Text>
+              </View>
+            ) : (
+              <TouchableOpacity
+                key={`${item.public_url}-${index}`}
+                style={styles.photoWrap}
+                onPress={() => item.public_url && onOpenPhoto(item.public_url)}
+                activeOpacity={0.88}
+              >
+                <Image source={{ uri: item.public_url! }} style={styles.postPhoto} resizeMode="cover" />
+              </TouchableOpacity>
+            )
+          ))}
+        </View>
       ) : null}
 
       <View style={styles.reactionRow}>
@@ -1077,15 +1118,33 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 26,
   },
+  mediaStack: {
+    gap: 10,
+    marginTop: 12,
+  },
   photoWrap: {
     alignSelf: 'stretch',
-    marginTop: 12,
     maxWidth: '100%',
   },
   postPhoto: {
     borderRadius: 8,
     height: 250,
     width: '100%',
+  },
+  videoPlaceholder: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.28)',
+    borderColor: HHS_COLORS.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    minHeight: 96,
+    justifyContent: 'center',
+    padding: 16,
+  },
+  videoPlaceholderText: {
+    ...HHS_TYPOGRAPHY.body,
+    color: HHS_COLORS.muted,
+    fontSize: 14,
   },
   reactionRow: {
     alignItems: 'center',
