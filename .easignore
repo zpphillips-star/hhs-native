@@ -1,0 +1,14 @@
+node_modules/
+.expo/
+.git/
+dist/
+web-build/
+android/app/build/
+ios/build/
+*.aab
+*.apk
+*.ipa
+*.log
+credentials.json
+credentials/
+ios/certs/
