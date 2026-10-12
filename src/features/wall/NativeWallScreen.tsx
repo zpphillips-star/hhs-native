@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { HHS_WEB_ORIGIN, isSupabaseEnvConfigured } from '../../config/env';
 import { useAuth } from '../auth/AuthProvider';
 import { supabase } from '../../lib/supabase';
+import { getAuthenticatedApiHeaders } from '../../lib/nativeApiAuth';
 import { HHS_COLORS, HHS_STYLES, HHS_TYPOGRAPHY } from '../../theme/hhsTheme';
 
 const PAGE_SIZE = 15;
@@ -46,18 +47,35 @@ type WallComment = {
   created_at: string;
   user_id: string;
   profiles: Profile | null;
+  wall_media?: WallMediaAttachment[];
+};
+
+type WallMediaAttachment = {
+  id?: string;
+  media_url: string;
+  media_type: 'image' | 'video' | 'gif';
+  mime_type?: string | null;
+  storage_bucket?: string | null;
+  storage_path?: string | null;
+  width?: number | null;
+  height?: number | null;
+  duration_ms?: number | null;
+  sort_order?: number | null;
 };
 
 type WallPost = {
   id: string;
   content: string;
   photo_url: string | null;
+  media_url?: string | null;
+  media_type?: string | null;
   created_at: string;
   beer_id: string | null;
   user_id: string;
   profiles: Profile | null;
   post_reactions: { id: string; user_id: string; reaction: string }[];
   post_comments: WallComment[];
+  wall_media?: WallMediaAttachment[];
   beers: { name: string; brewery: string; day_number: number | null; style: string | null; abv: number | null } | null;
 };
 
@@ -65,6 +83,12 @@ type PickedPhoto = {
   uri: string;
   mimeType: string;
   fileName: string;
+};
+
+type UploadedMedia = WallMediaAttachment & {
+  media_url: string;
+  storage_bucket: string;
+  storage_path: string;
 };
 
 type NativeWallError = {
@@ -112,6 +136,41 @@ function getPhotoExtension(photo: PickedPhoto) {
   return 'jpg';
 }
 
+function getMediaTypeFromMime(mimeType: string): WallMediaAttachment['media_type'] {
+  const normalized = mimeType.toLowerCase();
+  if (normalized === 'image/gif') return 'gif';
+  if (normalized.startsWith('video/')) return 'video';
+  return 'image';
+}
+
+function getPostMedia(post: WallPost): WallMediaAttachment[] {
+  const normalized = [...(post.wall_media || [])]
+    .filter((item) => item.media_url)
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  if (normalized.length > 0) return normalized;
+
+  const legacyUrl = post.media_url || post.photo_url;
+  if (!legacyUrl) return [];
+  const legacyType = post.media_type === 'video'
+    ? 'video'
+    : /\.gif(?:$|[?#])/i.test(legacyUrl)
+      ? 'gif'
+      : 'image';
+  return [{ media_url: legacyUrl, media_type: legacyType, sort_order: 0 }];
+}
+
+function getCommentMedia(comment: WallComment): WallMediaAttachment[] {
+  return [...(comment.wall_media || [])]
+    .filter((item) => item.media_url)
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+}
+
+function isMissingWallMediaError(error: { message?: string; code?: string } | null | undefined) {
+  if (!error) return false;
+  const message = error.message || '';
+  return error.code === 'PGRST200' || error.code === 'PGRST204' || /wall_media|relationship|schema cache|does not exist|Could not find/i.test(message);
+}
+
 function mergeProfiles(postsData: WallPost[], profileMap: Record<string, Profile>): WallPost[] {
   return postsData.map((post) => ({
     ...post,
@@ -140,20 +199,25 @@ async function fetchProfilesMap() {
 
 async function fetchWallPost(postId: string) {
   if (!supabase) return null;
-  const [{ data, error }, profileMap] = await Promise.all([
-    supabase
+  let queryResult = await supabase
+    .from('posts')
+    .select('*, wall_media(*), post_reactions(*), post_comments(*, wall_media(*)), beers(name, brewery, day_number, style, abv)')
+    .eq('id', postId)
+    .maybeSingle();
+  if (isMissingWallMediaError(queryResult.error)) {
+    queryResult = await supabase
       .from('posts')
       .select('*, post_reactions(*), post_comments(*), beers(name, brewery, day_number, style, abv)')
       .eq('id', postId)
-      .maybeSingle(),
-    fetchProfilesMap(),
-  ]);
+      .maybeSingle();
+  }
+  const [{ data, error }, profileMap] = await Promise.all([Promise.resolve(queryResult), fetchProfilesMap()]);
   if (error) throw error;
   if (!data) return null;
   return mergeProfiles([data as WallPost], profileMap)[0];
 }
 
-async function uploadPostPhoto(userId: string, photo: PickedPhoto) {
+async function uploadPostPhoto(userId: string, photo: PickedPhoto): Promise<UploadedMedia> {
   if (!supabase) throw new Error('Supabase is not configured for the native app.');
   const ext = getPhotoExtension(photo);
   const path = `${userId}/${Date.now()}.${ext}`;
@@ -165,7 +229,14 @@ async function uploadPostPhoto(userId: string, photo: PickedPhoto) {
   });
   if (error) throw error;
   const { data } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
-  return data.publicUrl;
+  return {
+    media_url: data.publicUrl,
+    media_type: getMediaTypeFromMime(photo.mimeType),
+    mime_type: photo.mimeType,
+    storage_bucket: PHOTO_BUCKET,
+    storage_path: path,
+    sort_order: 0,
+  };
 }
 
 function buildApiUrl(path: string) {
@@ -183,26 +254,51 @@ async function readApiError(response: Response) {
   }
 }
 
-async function postViaWallApi(userId: string, content: string, photoUrl: string | null, beerId: string | null) {
+async function postViaWallApi(userId: string, content: string, media: UploadedMedia | null, beerId: string | null) {
+  const authHeaders = await getAuthenticatedApiHeaders(userId);
+  const photoUrl = media?.media_url ?? null;
   const response = await fetch(buildApiUrl('/api/wall/post'), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ user_id: userId, content, beer_id: beerId, photo_url: photoUrl }),
+    headers: { 'Content-Type': 'application/json', ...authHeaders },
+    body: JSON.stringify({
+      user_id: userId,
+      content,
+      beer_id: beerId,
+      photo_url: photoUrl,
+      media_url: photoUrl,
+      media_type: media?.media_type,
+      media: media ? [media] : [],
+    }),
   });
   if (!response.ok) throw new Error(await readApiError(response));
   const json = await response.json() as { post?: { id?: string } };
   return json.post?.id ?? null;
 }
 
-async function insertPostDirectly(userId: string, content: string, photoUrl: string | null, beerId: string | null) {
+async function insertPostDirectly(userId: string, content: string, media: UploadedMedia | null, beerId: string | null) {
   if (!supabase) throw new Error('Supabase is not configured for the native app.');
+  const photoUrl = media?.media_url ?? null;
   const { data, error } = await supabase
     .from('posts')
-    .insert({ user_id: userId, content, beer_id: beerId, photo_url: photoUrl })
+    .insert({ user_id: userId, content, beer_id: beerId, photo_url: photoUrl, media_url: photoUrl, media_type: media?.media_type ?? null })
     .select('id')
     .maybeSingle();
   if (error) throw error;
-  return (data as { id?: string } | null)?.id ?? null;
+  const postId = (data as { id?: string } | null)?.id ?? null;
+  if (postId && media) {
+    const { error: mediaError } = await supabase.from('wall_media').insert({
+      post_id: postId,
+      user_id: userId,
+      media_url: media.media_url,
+      media_type: media.media_type,
+      mime_type: media.mime_type,
+      storage_bucket: media.storage_bucket,
+      storage_path: media.storage_path,
+      sort_order: 0,
+    });
+    if (mediaError && !isMissingWallMediaError(mediaError)) throw mediaError;
+  }
+  return postId;
 }
 
 export function NativeWallScreen({ initialBeerContext = null }: { initialBeerContext?: NativeWallBeerContext | null }) {
@@ -259,13 +355,24 @@ export function NativeWallScreen({ initialBeerContext = null }: { initialBeerCon
       const to = from + PAGE_SIZE - 1;
       let query = supabase
         .from('posts')
-        .select('*, post_reactions(*), post_comments(*), beers(name, brewery, day_number, style, abv)')
+        .select('*, wall_media(*), post_reactions(*), post_comments(*, wall_media(*)), beers(name, brewery, day_number, style, abv)')
         .order('created_at', { ascending: false })
         .range(from, to);
 
       if (beerId) query = query.eq('beer_id', beerId);
 
-      const [{ data, error: fetchError }, profileMap] = await Promise.all([query, fetchProfilesMap()]);
+      let queryResult = await query;
+      if (isMissingWallMediaError(queryResult.error)) {
+        let legacyQuery = supabase
+          .from('posts')
+          .select('*, post_reactions(*), post_comments(*), beers(name, brewery, day_number, style, abv)')
+          .order('created_at', { ascending: false })
+          .range(from, to);
+        if (beerId) legacyQuery = legacyQuery.eq('beer_id', beerId);
+        queryResult = await legacyQuery;
+      }
+
+      const [{ data, error: fetchError }, profileMap] = await Promise.all([Promise.resolve(queryResult), fetchProfilesMap()]);
       if (fetchError) throw fetchError;
 
       const incoming = mergeProfiles((data as WallPost[]) || [], profileMap);
@@ -374,13 +481,13 @@ export function NativeWallScreen({ initialBeerContext = null }: { initialBeerCon
 
     try {
       const content = composerText.trim();
-      const photoUrl = pickedPhoto ? await uploadPostPhoto(user.id, pickedPhoto) : null;
+      const media = pickedPhoto ? await uploadPostPhoto(user.id, pickedPhoto) : null;
       let postId: string | null = null;
       try {
-        postId = await postViaWallApi(user.id, content, photoUrl, filterBeerId);
+        postId = await postViaWallApi(user.id, content, media, filterBeerId);
       } catch (apiError) {
         console.warn('[HHS native wall] post API failed; falling back to Supabase insert:', apiError instanceof Error ? apiError.message : apiError);
-        postId = await insertPostDirectly(user.id, content, photoUrl, filterBeerId);
+        postId = await insertPostDirectly(user.id, content, media, filterBeerId);
       }
 
       clearComposer();
@@ -678,6 +785,7 @@ function PostCard({
   const comments = [...(post.post_comments || [])].sort(
     (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
   );
+  const postMedia = getPostMedia(post);
 
   const submitComment = useCallback(async () => {
     const content = commentText.trim();
@@ -708,9 +816,14 @@ function PostCard({
 
       {post.content ? <Text style={styles.postContent}>{post.content}</Text> : null}
 
-      {post.photo_url ? (
-        <TouchableOpacity style={styles.photoWrap} onPress={() => onOpenPhoto(post.photo_url!)} activeOpacity={0.88}>
-          <Image source={{ uri: post.photo_url }} style={styles.postPhoto} resizeMode="cover" />
+      {postMedia[0] ? (
+        <TouchableOpacity style={styles.photoWrap} onPress={() => onOpenPhoto(postMedia[0].media_url)} activeOpacity={0.88}>
+          <Image source={{ uri: postMedia[0].media_url }} style={styles.postPhoto} resizeMode="cover" />
+          {postMedia.length > 1 ? (
+            <View style={styles.mediaCountBadge}>
+              <Text style={styles.mediaCountBadgeText}>+{postMedia.length - 1}</Text>
+            </View>
+          ) : null}
         </TouchableOpacity>
       ) : null}
 
@@ -745,6 +858,9 @@ function PostCard({
                 <Text style={styles.commentTimestamp}>· {formatCommentTimestamp(comment.created_at)}</Text>
               </View>
               <Text style={styles.commentContent}>{comment.content}</Text>
+              {getCommentMedia(comment)[0] ? (
+                <Text style={styles.commentMediaHint}>📎 {getCommentMedia(comment).length} attachment{getCommentMedia(comment).length === 1 ? '' : 's'}</Text>
+              ) : null}
             </View>
           ))}
           {userId ? (
@@ -1087,6 +1203,25 @@ const styles = StyleSheet.create({
     height: 250,
     width: '100%',
   },
+  mediaCountBadge: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.68)',
+    borderColor: 'rgba(255,255,255,0.24)',
+    borderRadius: 14,
+    borderWidth: 1,
+    bottom: 10,
+    justifyContent: 'center',
+    minWidth: 34,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    position: 'absolute',
+    right: 10,
+  },
+  mediaCountBadgeText: {
+    ...HHS_TYPOGRAPHY.body,
+    color: '#fff',
+    fontSize: 12,
+  },
   reactionRow: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -1167,6 +1302,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 21,
     marginTop: 3,
+  },
+  commentMediaHint: {
+    ...HHS_TYPOGRAPHY.body,
+    color: HHS_COLORS.muted,
+    fontSize: 12,
+    marginTop: 5,
   },
   commentComposer: {
     alignItems: 'center',

@@ -42,3 +42,7 @@ credentials/
 # generated native folders
 /ios
 /android
+*.aab
+*.apk
+*.idsig
+*.ipa

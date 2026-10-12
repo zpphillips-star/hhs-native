@@ -97,8 +97,8 @@ android {
         applicationId 'com.zplotindustries.hallowedhopsociety'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 89
-        versionName "1.0.87"
+        versionCode 144
+        versionName "1.0.144"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -118,10 +118,10 @@ android {
                 hhsUploadPropsFile.withInputStream { hhsUploadProps.load(it) }
             }
 
-            def hhsUploadStoreFile = project.findProperty('HHS_UPLOAD_STORE_FILE') ?: System.getenv('HHS_UPLOAD_STORE_FILE') ?: "${System.properties['user.home']}/.android/hhs-upload-key.jks"
-            def hhsUploadStorePassword = project.findProperty('HHS_UPLOAD_STORE_PASSWORD') ?: System.getenv('HHS_UPLOAD_STORE_PASSWORD') ?: hhsUploadProps.getProperty('HHS_UPLOAD_STORE_PASSWORD') ?: hhsUploadProps.getProperty('storePassword')
-            def hhsUploadKeyAlias = project.findProperty('HHS_UPLOAD_KEY_ALIAS') ?: System.getenv('HHS_UPLOAD_KEY_ALIAS') ?: hhsUploadProps.getProperty('HHS_UPLOAD_KEY_ALIAS') ?: hhsUploadProps.getProperty('keyAlias') ?: 'hhs-upload'
-            def hhsUploadKeyPassword = project.findProperty('HHS_UPLOAD_KEY_PASSWORD') ?: System.getenv('HHS_UPLOAD_KEY_PASSWORD') ?: hhsUploadProps.getProperty('HHS_UPLOAD_KEY_PASSWORD') ?: hhsUploadProps.getProperty('keyPassword')
+            def hhsUploadStoreFile = project.findProperty('HHS_UPLOAD_STORE_FILE') ?: System.getenv('HHS_UPLOAD_STORE_FILE') ?: System.getenv('EAS_BUILD_ANDROID_KEYSTORE_PATH') ?: "${System.properties['user.home']}/.android/hhs-upload-key.jks"
+            def hhsUploadStorePassword = project.findProperty('HHS_UPLOAD_STORE_PASSWORD') ?: System.getenv('HHS_UPLOAD_STORE_PASSWORD') ?: System.getenv('EAS_BUILD_ANDROID_KEYSTORE_PASSWORD') ?: hhsUploadProps.getProperty('HHS_UPLOAD_STORE_PASSWORD') ?: hhsUploadProps.getProperty('storePassword')
+            def hhsUploadKeyAlias = project.findProperty('HHS_UPLOAD_KEY_ALIAS') ?: System.getenv('HHS_UPLOAD_KEY_ALIAS') ?: System.getenv('EAS_BUILD_ANDROID_KEY_ALIAS') ?: hhsUploadProps.getProperty('HHS_UPLOAD_KEY_ALIAS') ?: hhsUploadProps.getProperty('keyAlias') ?: 'hhs-upload'
+            def hhsUploadKeyPassword = project.findProperty('HHS_UPLOAD_KEY_PASSWORD') ?: System.getenv('HHS_UPLOAD_KEY_PASSWORD') ?: System.getenv('EAS_BUILD_ANDROID_KEY_PASSWORD') ?: hhsUploadProps.getProperty('HHS_UPLOAD_KEY_PASSWORD') ?: hhsUploadProps.getProperty('keyPassword')
 
             if (!hhsUploadStoreFile || !hhsUploadStorePassword || !hhsUploadKeyAlias || !hhsUploadKeyPassword) {
                 throw new GradleException('Missing HHS upload signing config. Expected HHS_UPLOAD_* values or ~/.android/hhs-upload-key.properties.')

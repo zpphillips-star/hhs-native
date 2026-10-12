@@ -2,7 +2,7 @@
   "expo": {
     "name": "Hallowed Hop Society",
     "slug": "hhs-native",
-    "version": "1.0.87",
+    "version": "1.0.144",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -13,12 +13,15 @@
     },
     "ios": {
       "supportsTablet": true,
-      "buildNumber": "89",
+      "buildNumber": "144",
       "bundleIdentifier": "com.zplotindustries.hallowedhopsociety",
       "infoPlist": {
         "LSApplicationQueriesSchemes": [
           "venmo"
-        ]
+        ],
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "Hallowed Hop Society uses the camera so you can add photos to Wall posts.",
+        "NSPhotoLibraryUsageDescription": "Hallowed Hop Society uses your photo library so you can attach photos and videos to Wall posts."
       }
     },
     "android": {
@@ -27,7 +30,7 @@
         "backgroundColor": "#191726"
       },
       "package": "com.zplotindustries.hallowedhopsociety",
-      "versionCode": 89,
+      "versionCode": 144,
       "permissions": [
         "INTERNET",
         "POST_NOTIFICATIONS",
@@ -37,7 +40,8 @@
       "blockedPermissions": [
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.SYSTEM_ALERT_WINDOW",
-        "android.permission.WRITE_EXTERNAL_STORAGE"
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO"
       ],
       "intentFilters": [
         {
@@ -58,7 +62,8 @@
             "DEFAULT"
           ]
         }
-      ]
+      ],
+      "googleServicesFile": "./android/app/google-services.json"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -76,7 +81,7 @@
       "expo-image-picker"
     ],
     "scheme": "hhs",
-    "description": "Hallowed Hop Society — 31 unique beers in 31 haunted days.",
+    "description": "Hallowed Hop Society \u00e2\u20ac\u201d 31 unique beers in 31 haunted days.",
     "primaryColor": "#191726"
   }
 }
