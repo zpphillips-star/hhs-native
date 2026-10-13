@@ -1,4 +1,5 @@
 import * as ImagePicker from 'expo-image-picker';
+import { uuid } from 'expo-modules-core';
 import { Alert, Platform } from 'react-native';
 
 import { HHS_WEB_ORIGIN } from '../../config/env';
@@ -8,9 +9,16 @@ import { supabase } from '../../lib/supabase';
 const PHOTO_BUCKET = 'post-photos';
 const MAX_VIDEO_UPLOAD_BYTES = 50 * 1024 * 1024;
 const MAX_VIDEO_DURATION_MS = 90 * 1000;
-const SUPPORTED_VIDEO_MIME_TYPES = ['video/mp4', 'video/quicktime', 'video/webm', 'video/3gpp'] as const;
-const MEDIA_COLUMN_NAMES = ['media_type', 'media_url', 'thumbnail_url', 'media_size_bytes', 'video_duration_ms'] as const;
-const WALL_MEDIA_COLUMN_RE = /wall_media|schema cache|does not exist|Could not find/i;
+const MEDIA_EXTENSIONS: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+  'video/mp4': 'mp4',
+  'video/quicktime': 'mov',
+  'video/webm': 'webm',
+  'video/3gpp': '3gp',
+};
 
 export type WallMediaSource = 'photo-library' | 'video-library' | 'camera';
 
@@ -34,30 +42,63 @@ export type UploadedPostMedia = {
   storagePath: string | null;
 };
 
-function getMediaExtension(media: PickedMedia) {
-  const fromName = media.fileName.split('.').pop();
-  if (fromName && fromName.length <= 5) return fromName.toLowerCase();
-  if (media.mimeType.includes('mp4')) return 'mp4';
-  if (media.mimeType.includes('quicktime')) return 'mov';
-  if (media.mimeType.includes('webm')) return 'webm';
-  if (media.mimeType.includes('3gpp')) return '3gp';
-  if (media.mimeType.includes('png')) return 'png';
-  if (media.mimeType.includes('webp')) return 'webp';
-  return 'jpg';
+export type WallMultiMediaSupport = {
+  supported: boolean;
+  reason?: string;
+};
+
+type PostMediaPayload = {
+  media_url: string;
+  media_type: 'image' | 'video';
+  mime_type: string | null;
+  storage_bucket: string;
+  storage_path: string | null;
+  duration_ms: number | null;
+  thumbnail_url: string | null;
+  sort_order: number;
+};
+
+function normalizePickedAsset(
+  asset: ImagePicker.ImagePickerAsset,
+  selectedMediaType: 'image' | 'video',
+): PickedMedia {
+  const assetType = asset.type === 'video' ? 'video' : asset.type === 'image' ? 'image' : selectedMediaType;
+  // SDK 54 can return original HEIC/AVIF. Quality is NOT a conversion guarantee.
+  const resolvedMimeType = asset.mimeType?.toLowerCase() || '';
+  const fileSize = typeof asset.fileSize === 'number' ? asset.fileSize : null;
+  const durationMs = assetType === 'video' && typeof asset.duration === 'number' ? Math.round(asset.duration) : null;
+
+  return {
+    uri: asset.uri,
+    mimeType: resolvedMimeType,
+    fileName: asset.fileName || 'selected-media',
+    mediaType: assetType,
+    fileSize,
+    durationMs,
+  };
 }
 
-function isSupportedVideoMime(mimeType: string) {
-  return mimeType.startsWith('video/') && SUPPORTED_VIDEO_MIME_TYPES.some((value) => value === mimeType);
+function validatePickedMedia(media: PickedMedia): string | null {
+  if (!Object.hasOwn(MEDIA_EXTENSIONS, media.mimeType) || !media.mimeType.startsWith(`${media.mediaType}/`)) {
+    return `Unsupported Wall media MIME type: ${media.mimeType || 'unknown'}. Choose JPEG, PNG, GIF, WebP, MP4, MOV, WEBM, or 3GP. No format conversion was verified.`;
+  }
+  if (media.mediaType === 'video' && media.fileSize && media.fileSize > MAX_VIDEO_UPLOAD_BYTES) {
+    return 'Wall videos must be 50 MB or smaller.';
+  }
+  if (media.mediaType === 'video' && media.durationMs && media.durationMs > MAX_VIDEO_DURATION_MS) {
+    return 'Wall videos must be 90 seconds or shorter.';
+  }
+  return null;
 }
 
-export async function pickWallMedia(source: WallMediaSource): Promise<PickedMedia | null> {
+export async function pickWallMedia(source: WallMediaSource, selectionLimit = 1): Promise<PickedMedia[]> {
   const selectedMediaType = source === 'video-library' ? 'video' : 'image';
   try {
     if (source === 'camera') {
       const permission = await ImagePicker.requestCameraPermissionsAsync();
       if (!permission.granted) {
         Alert.alert('Camera blocked', 'Camera permission is required to add a new photo from the camera.');
-        return null;
+        return [];
       }
     } else {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -68,12 +109,13 @@ export async function pickWallMedia(source: WallMediaSource): Promise<PickedMedi
             ? 'Photo library permission is required to add an existing video.'
             : 'Photo library permission is required to add an existing photo.',
         );
-        return null;
+        return [];
       }
     }
 
     await new Promise((resolve) => setTimeout(resolve, Platform.OS === 'android' ? 250 : 100));
 
+    const limitedSelection = Math.max(1, selectionLimit);
     const result = source === 'camera'
       ? await ImagePicker.launchCameraAsync({
         mediaTypes: ['images'],
@@ -81,59 +123,52 @@ export async function pickWallMedia(source: WallMediaSource): Promise<PickedMedi
       })
       : await ImagePicker.launchImageLibraryAsync({
         mediaTypes: source === 'video-library' ? ['videos'] : ['images'],
+        allowsMultipleSelection: limitedSelection > 1,
+        selectionLimit: limitedSelection,
+        orderedSelection: true,
         quality: 0.85,
       });
 
-    if (result.canceled || !result.assets[0]) return null;
-    const asset = result.assets[0];
-    const resolvedMimeType = asset.mimeType || (selectedMediaType === 'video' ? 'video/mp4' : 'image/jpeg');
-    const fileSize = typeof asset.fileSize === 'number' ? asset.fileSize : null;
-    const durationMs = selectedMediaType === 'video' && typeof asset.duration === 'number' ? Math.round(asset.duration) : null;
-    if (selectedMediaType === 'video' && !isSupportedVideoMime(resolvedMimeType)) {
-      Alert.alert('Unsupported video', 'Use MP4, MOV, WEBM, or 3GP for Wall videos.');
-      return null;
+    if (result.canceled || !result.assets?.length) return [];
+    const picked = result.assets.map((asset) => normalizePickedAsset(asset, selectedMediaType));
+    const valid: PickedMedia[] = [];
+    const rejectedReasons = new Set<string>();
+    picked.forEach((media) => {
+      const validationError = validatePickedMedia(media);
+      if (validationError) rejectedReasons.add(validationError);
+      else valid.push(media);
+    });
+    if (rejectedReasons.size > 0) {
+      Alert.alert(
+        selectedMediaType === 'video' ? 'Video skipped' : 'Media skipped',
+        Array.from(rejectedReasons).join('\n'),
+      );
     }
-    if (selectedMediaType === 'video' && fileSize && fileSize > MAX_VIDEO_UPLOAD_BYTES) {
-      Alert.alert('Video too large', 'Wall videos must be 50 MB or smaller.');
-      return null;
-    }
-    if (selectedMediaType === 'video' && durationMs && durationMs > MAX_VIDEO_DURATION_MS) {
-      Alert.alert('Video too long', 'Wall videos must be 90 seconds or shorter.');
-      return null;
-    }
-
-    return {
-      uri: asset.uri,
-      mimeType: resolvedMimeType,
-      fileName: asset.fileName || (selectedMediaType === 'video' ? `wall-video-${Date.now()}.mp4` : `wall-photo-${Date.now()}.jpg`),
-      mediaType: selectedMediaType,
-      fileSize,
-      durationMs,
-    };
+    return valid.slice(0, limitedSelection);
   } catch (pickError) {
     Alert.alert(
       selectedMediaType === 'video' ? 'Video error' : 'Photo error',
       pickError instanceof Error ? pickError.message : `Could not pick a ${selectedMediaType === 'video' ? 'video' : 'photo'}.`,
     );
-    return null;
+    return [];
   }
 }
 
 export async function uploadPostMedia(userId: string, media: PickedMedia) {
   if (!supabase) throw new Error('Supabase is not configured for the native app.');
-  if (media.mediaType === 'video' && media.fileSize && media.fileSize > MAX_VIDEO_UPLOAD_BYTES) {
-    throw new Error('Videos must be 50 MB or smaller.');
-  }
-  if (media.mediaType === 'video' && media.durationMs && media.durationMs > MAX_VIDEO_DURATION_MS) {
-    throw new Error('Videos must be 90 seconds or shorter.');
-  }
-  const ext = getMediaExtension(media);
-  const path = `${userId}/${Date.now()}-${media.mediaType}.${ext}`;
+  const validationError = validatePickedMedia(media);
+  if (validationError) throw new Error(validationError);
+  const ext = MEDIA_EXTENSIONS[media.mimeType];
+  const path = `${userId}/${uuid.v4()}.${ext}`;
   const response = await fetch(media.uri);
   if (!response.ok) {
     throw new Error(`Could not read selected ${media.mediaType} (${response.status}).`);
   }
   const body = await response.arrayBuffer();
+  if (body.byteLength === 0) throw new Error('The selected media file is empty.');
+  if (media.mediaType === 'video' && body.byteLength > MAX_VIDEO_UPLOAD_BYTES) {
+    throw new Error('Videos must be 50 MB or smaller.');
+  }
   const { error } = await supabase.storage.from(PHOTO_BUCKET).upload(path, body, {
     contentType: media.mimeType,
     upsert: false,
@@ -147,7 +182,7 @@ export async function uploadPostMedia(userId: string, media: PickedMedia) {
     mediaUrl: data.publicUrl,
     mediaType: media.mediaType,
     thumbnailUrl: null,
-    mediaSizeBytes: media.fileSize ?? null,
+    mediaSizeBytes: body.byteLength,
     videoDurationMs: media.mediaType === 'video' ? media.durationMs ?? null : null,
     mimeType: media.mimeType,
     storageBucket: PHOTO_BUCKET,
@@ -170,7 +205,7 @@ export async function readWallApiError(response: Response) {
   }
 }
 
-function getPostPayload(
+export function getPostPayload(
   userId: string,
   content: string,
   media: UploadedPostMedia | UploadedPostMedia[] | null,
@@ -196,94 +231,88 @@ function getPostPayload(
 
   return {
     ...payload,
-    media: mediaItems.map((item) => ({
-      media_url: item.mediaUrl,
-      media_type: item.mediaType,
-      mime_type: item.mimeType,
-      storage_bucket: item.storageBucket,
-      storage_path: item.storagePath,
-      duration_ms: item.videoDurationMs,
-    })),
+    media: getPostMediaPayload(mediaItems),
   };
 }
 
-export async function postViaWallApi(
-  userId: string,
-  content: string,
-  media: UploadedPostMedia | UploadedPostMedia[] | null,
-  beerId: string | null,
-  includeMediaMetadata = true,
-) {
+function getPostMediaPayload(mediaItems: UploadedPostMedia[]): PostMediaPayload[] {
+  return mediaItems.map((item, index) => ({
+    media_url: item.mediaUrl,
+    media_type: item.mediaType,
+    mime_type: item.mimeType,
+    storage_bucket: item.storageBucket,
+    storage_path: item.storagePath,
+    duration_ms: item.videoDurationMs,
+    thumbnail_url: item.thumbnailUrl,
+    sort_order: index,
+  }));
+}
+
+/** No table probe can prove that the API atomically commits and deduplicates. */
+export async function requireAtomicWallPostSupport(userId: string): Promise<void> {
   const authHeaders = await getAuthenticatedApiHeaders(userId);
-  const response = await fetch(buildWallApiUrl('/api/wall/post'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders },
-    body: JSON.stringify(getPostPayload(userId, content, media, beerId, includeMediaMetadata)),
+  const response = await fetchWallWithTimeout({
+    method: 'GET',
+    headers: { ...authHeaders, 'Cache-Control': 'no-cache' },
   });
-  if (!response.ok) throw new Error(await readWallApiError(response));
-  const json = await response.json() as { post?: { id?: string } };
-  return json.post?.id ?? null;
-}
-
-function isMissingMediaColumnError(error: { message?: string; code?: string } | null): boolean {
-  if (!error) return false;
-  const message = (error.message || '').toLowerCase();
-  return error.code === 'PGRST204' ||
-    MEDIA_COLUMN_NAMES.some((column) => message.includes(column)) ||
-    /media_(url|type)|thumbnail_url|video_duration_ms|media_size_bytes|column .* does not exist|Could not find .*media_/i.test(message);
-}
-
-function isMissingWallMediaError(error: { message?: string; code?: string } | null): boolean {
-  if (!error) return false;
-  const message = error.message || '';
-  return error.code === 'PGRST204' || WALL_MEDIA_COLUMN_RE.test(message);
-}
-
-export async function insertPostDirectly(
-  userId: string,
-  content: string,
-  media: UploadedPostMedia | UploadedPostMedia[] | null,
-  beerId: string | null,
-  includeMediaMetadata = true,
-) {
-  if (!supabase) throw new Error('Supabase is not configured for the native app.');
-  const mediaItems = Array.isArray(media) ? media : media ? [media] : [];
-  let result = await supabase
-    .from('posts')
-    .insert(getPostPayload(userId, content, media, beerId, includeMediaMetadata))
-    .select('id')
-    .maybeSingle();
-  if (isMissingMediaColumnError(result.error)) {
-    result = await supabase
-      .from('posts')
-      .insert({
-        user_id: userId,
-        content,
-        beer_id: beerId,
-        photo_url: mediaItems[0]?.mediaUrl ?? null,
-      })
-      .select('id')
-      .maybeSingle();
+  const json = await response.json().catch(() => null);
+  const capabilities = json?.capabilities;
+  if (!response.ok || json?.ok !== true ||
+      capabilities?.atomic_wall_post !== 1 ||
+      capabilities?.idempotency_key !== 1 ||
+      capabilities?.ordered_media !== 1) {
+    throw new Error('This testing build requires the atomic, idempotent Wall API capability handshake. Posting is blocked until the backend update is available.');
   }
-  if (result.error) throw result.error;
-  const postId = (result.data as { id?: string } | null)?.id ?? null;
-  if (postId && mediaItems.length > 0 && includeMediaMetadata) {
-    const { error: mediaError } = await supabase
-      .from('wall_media')
-      .insert(mediaItems.map((item, index) => ({
-        post_id: postId,
-        user_id: userId,
-        media_url: item.mediaUrl,
-        media_type: item.mediaType,
-        mime_type: item.mimeType,
-        storage_bucket: item.storageBucket,
-        storage_path: item.storagePath,
-        duration_ms: item.videoDurationMs,
-        sort_order: index,
-      })));
-    if (mediaError && !isMissingWallMediaError(mediaError)) throw mediaError;
+}
+
+// Deadline covers body reading too (a server can send headers then stall).
+async function fetchWallWithTimeout(init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30_000);
+  try {
+    const response = await fetch(buildWallApiUrl('/api/wall/post'), { ...init, signal: controller.signal });
+    const text = await response.text();
+    return {
+      ok: response.ok,
+      status: response.status,
+      text: async () => text,
+      json: async () => JSON.parse(text),
+    } as Response;
+  } finally {
+    clearTimeout(timeout);
   }
-  return postId;
+}
+
+export class WallPostApiError extends Error {
+  constructor(message: string, readonly nonCommitting: boolean) {
+    super(message);
+  }
+}
+
+/** Internal transport: caller must durably store this exact body BEFORE calling. */
+export async function sendFrozenWallPost(userId: string, body: string): Promise<string> {
+  const payload = JSON.parse(body) as { request_id: string; user_id: string };
+  if (payload.user_id !== userId || !payload.request_id) throw new Error('Invalid pending Wall post owner or request ID.');
+  // Recheck on every manual retry, including after app restart/backend rollback.
+  await requireAtomicWallPostSupport(userId);
+  const authHeaders = await getAuthenticatedApiHeaders(userId);
+  const response = await fetchWallWithTimeout({
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': payload.request_id, ...authHeaders },
+    body,
+  });
+  const json = await response.json().catch(() => null);
+  if (!response.ok) {
+    // Never release a conflict, timeout, arbitrary proxy 4xx, or server failure.
+    const nonCommitting = [400, 401, 403, 413, 415, 422].includes(response.status) &&
+      json?.committed === false && typeof json?.error === 'string';
+    throw new WallPostApiError(json?.error || `Wall request failed (${response.status}).`, nonCommitting);
+  }
+  if (json?.ok !== true || typeof json?.id !== 'string' || !json.id ||
+      json?.post?.id !== json.id) {
+    throw new WallPostApiError('The server response did not confirm a Wall post ID.', false);
+  }
+  return json.id;
 }
 
 export async function patchPostViaWallApi(userId: string, postId: string, content: string) {

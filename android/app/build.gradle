@@ -97,8 +97,8 @@ android {
         applicationId 'com.zplotindustries.hallowedhopsociety'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 150
-        versionName "1.0.150"
+        versionCode 153
+        versionName "1.0.153"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }

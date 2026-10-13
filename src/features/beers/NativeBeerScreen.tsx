@@ -2,6 +2,7 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Image,
   KeyboardAvoidingView,
   Modal,
@@ -33,7 +34,12 @@ import {
   isParticipatingBeerDay,
   useBeerVisibility,
 } from '../membership/beerVisibilityService';
-import { pickWallMedia, uploadPostMedia, type PickedMedia, type WallMediaSource } from '../wall/wallPostService';
+import {
+  pickWallMedia,
+  type PickedMedia,
+  type WallMediaSource,
+} from '../wall/wallPostService';
+import { retryPendingWallPost } from '../wall/wallSubmission';
 
 const COLORS = HHS_COLORS;
 
@@ -46,6 +52,7 @@ const BEER_CALENDAR_MONTH_INDEX = 9; // October
 const BEER_CALENDAR_MONTH_NAME = 'October';
 const BEER_CALENDAR_DAYS = 31;
 const HHS_MUG_IMAGE = require('../../../assets/mughhs.webp');
+const MAX_BEER_WALL_MEDIA_ATTACHMENTS = 3;
 
 type NativeBeerScreenProps = {
   mode?: 'calendar' | 'yourBeer';
@@ -133,6 +140,7 @@ export function NativeBeerScreen({ mode = 'calendar', onBeerWallPostSuccess }: N
   // Guard: only scroll once per mount; re-mounts when tab is re-selected.
   const hasScrolledToToday = useRef(false);
   const pickingBeerWallMediaRef = useRef(false);
+  const postingBeerWallRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -156,14 +164,14 @@ export function NativeBeerScreen({ mode = 'calendar', onBeerWallPostSuccess }: N
   const [selectedWallPostText, setSelectedWallPostText] = useState('');
   const [selectedWallPosting, setSelectedWallPosting] = useState(false);
   const [selectedWallPosted, setSelectedWallPosted] = useState(false);
-  const [selectedWallMedia, setSelectedWallMedia] = useState<PickedMedia | null>(null);
+  const [selectedWallMedia, setSelectedWallMedia] = useState<PickedMedia[]>([]);
   const [selectedWallPickingMedia, setSelectedWallPickingMedia] = useState(false);
   // Today wall post / activity state (Your Beer tab)
   const [todayWallError, setTodayWallError] = useState<string | null>(null);
   const [todayWallPostText, setTodayWallPostText] = useState('');
   const [todayWallPosting, setTodayWallPosting] = useState(false);
   const [todayWallPosted, setTodayWallPosted] = useState(false);
-  const [todayWallMedia, setTodayWallMedia] = useState<PickedMedia | null>(null);
+  const [todayWallMedia, setTodayWallMedia] = useState<PickedMedia[]>([]);
   const [todayWallPickingMedia, setTodayWallPickingMedia] = useState(false);
   const [todayPeekEnabled, setTodayPeekEnabled] = useState(false);
 
@@ -245,12 +253,12 @@ export function NativeBeerScreen({ mode = 'calendar', onBeerWallPostSuccess }: N
   }, [todayBeer?.id, beerVisibility.effectivePreference, beerVisibility.tier]);
 
   useEffect(() => {
-    setSelectedWallMedia(null);
+    setSelectedWallMedia([]);
     setSelectedWallPickingMedia(false);
   }, [selectedBeer?.id]);
 
   useEffect(() => {
-    setTodayWallMedia(null);
+    setTodayWallMedia([]);
     setTodayWallPickingMedia(false);
   }, [todayBeer?.id]);
 
@@ -375,6 +383,7 @@ export function NativeBeerScreen({ mode = 'calendar', onBeerWallPostSuccess }: N
   };
 
   const closeBeerDetail = () => {
+    if (postingBeerWallRef.current) return;
     setSelectedBeer(null);
     setSelectedRating(null);
     setRatingError(null);
@@ -432,7 +441,7 @@ export function NativeBeerScreen({ mode = 'calendar', onBeerWallPostSuccess }: N
   };
 
   const handleBeerWallMediaPick = async (target: 'selected' | 'today', source: WallMediaSource) => {
-    if (pickingBeerWallMediaRef.current) return;
+    if (pickingBeerWallMediaRef.current || postingBeerWallRef.current) return;
     pickingBeerWallMediaRef.current = true;
     if (target === 'selected') {
       setSelectedWallPickingMedia(true);
@@ -443,10 +452,19 @@ export function NativeBeerScreen({ mode = 'calendar', onBeerWallPostSuccess }: N
     }
 
     try {
-      const media = await pickWallMedia(source);
-      if (media) {
-        if (target === 'selected') setSelectedWallMedia(media);
-        else setTodayWallMedia(media);
+      const existingCount = target === 'selected' ? selectedWallMedia.length : todayWallMedia.length;
+      const remainingSlots = MAX_BEER_WALL_MEDIA_ATTACHMENTS - existingCount;
+      if (remainingSlots <= 0) {
+        Alert.alert('Media limit reached', `Beer posts support up to ${MAX_BEER_WALL_MEDIA_ATTACHMENTS} attachments in this phase.`);
+        return;
+      }
+      const media = await pickWallMedia(source, remainingSlots);
+      if (media.length > 0) {
+        if (target === 'selected') {
+          setSelectedWallMedia((current) => [...current, ...media].slice(0, MAX_BEER_WALL_MEDIA_ATTACHMENTS));
+        } else {
+          setTodayWallMedia((current) => [...current, ...media].slice(0, MAX_BEER_WALL_MEDIA_ATTACHMENTS));
+        }
       }
     } finally {
       pickingBeerWallMediaRef.current = false;
@@ -456,64 +474,101 @@ export function NativeBeerScreen({ mode = 'calendar', onBeerWallPostSuccess }: N
   };
 
   const handleSelectedWallPost = async () => {
-    if (!user || !selectedBeer || selectedWallPosting || selectedWallPickingMedia || !selectedParticipates) return;
+    if (!user || !selectedBeer || postingBeerWallRef.current || pickingBeerWallMediaRef.current || !selectedParticipates) return;
     const trimmed = selectedWallPostText.trim();
-    if (!trimmed && !selectedWallMedia) {
+    if (!trimmed && selectedWallMedia.length === 0) {
       setSelectedWallError('Write a Wall post before publishing.');
       return;
     }
 
+    postingBeerWallRef.current = true;
     setSelectedWallPosting(true);
     setSelectedWallError(null);
     setSelectedWallPosted(false);
     try {
-      const uploadedMedia = selectedWallMedia ? await uploadPostMedia(user.id, selectedWallMedia) : null;
-      await createBeerWallPost(user.id, selectedBeer.id, trimmed, uploadedMedia);
+      await createBeerWallPost(user.id, selectedBeer.id, selectedWallPostText, selectedWallMedia);
       setSelectedWallPostText('');
-      setSelectedWallMedia(null);
+      setSelectedWallMedia([]);
       setSelectedWallPosted(true);
-      onBeerWallPostSuccess?.({
-        id: selectedBeer.id,
-        name: selectedBeer.name,
-        dayNumber: selectedBeer.day_number,
-        brewery: selectedBeer.brewery,
-      });
+      try {
+        await onBeerWallPostSuccess?.({
+          id: selectedBeer.id,
+          name: selectedBeer.name,
+          dayNumber: selectedBeer.day_number,
+          brewery: selectedBeer.brewery,
+        });
+      } catch {
+        Alert.alert('Post published', 'Your post was saved, but the Wall could not open. Open the Wall to see it; do not post it again.');
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not post to the Wall.';
       setSelectedWallError(message);
     } finally {
+      postingBeerWallRef.current = false;
       setSelectedWallPosting(false);
     }
   };
 
   const handleTodayWallPost = async () => {
-    if (!user || !todayBeer || todayWallPosting || todayWallPickingMedia || !todayParticipates) return;
+    if (!user || !todayBeer || postingBeerWallRef.current || pickingBeerWallMediaRef.current || !todayParticipates) return;
     const trimmed = todayWallPostText.trim();
-    if (!trimmed && !todayWallMedia) {
+    if (!trimmed && todayWallMedia.length === 0) {
       setTodayWallError('Write a Wall post before publishing.');
       return;
     }
 
+    postingBeerWallRef.current = true;
     setTodayWallPosting(true);
     setTodayWallError(null);
     setTodayWallPosted(false);
     try {
-      const uploadedMedia = todayWallMedia ? await uploadPostMedia(user.id, todayWallMedia) : null;
-      await createBeerWallPost(user.id, todayBeer.id, trimmed, uploadedMedia);
+      await createBeerWallPost(user.id, todayBeer.id, todayWallPostText, todayWallMedia);
       setTodayWallPostText('');
-      setTodayWallMedia(null);
+      setTodayWallMedia([]);
       setTodayWallPosted(true);
-      onBeerWallPostSuccess?.({
-        id: todayBeer.id,
-        name: todayBeer.name,
-        dayNumber: todayBeer.day_number,
-        brewery: todayBeer.brewery,
-      });
+      try {
+        await onBeerWallPostSuccess?.({
+          id: todayBeer.id,
+          name: todayBeer.name,
+          dayNumber: todayBeer.day_number,
+          brewery: todayBeer.brewery,
+        });
+      } catch {
+        Alert.alert('Post published', 'Your post was saved, but the Wall could not open. Open the Wall to see it; do not post it again.');
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not post to the Wall.';
       setTodayWallError(message);
     } finally {
+      postingBeerWallRef.current = false;
       setTodayWallPosting(false);
+    }
+  };
+
+  const handleRetryPendingWallPost = async (target: 'selected' | 'today') => {
+    if (!user || postingBeerWallRef.current || pickingBeerWallMediaRef.current) return;
+    postingBeerWallRef.current = true;
+    const setPosting = target === 'selected' ? setSelectedWallPosting : setTodayWallPosting;
+    const setWallError = target === 'selected' ? setSelectedWallError : setTodayWallError;
+    setPosting(true);
+    setWallError(null);
+    try {
+      const postId = await retryPendingWallPost(user.id);
+      Alert.alert(
+        postId === null ? 'No pending post' : 'Pending post published',
+        postId === null
+          ? 'There is no pending Wall post for this account. Your current draft has been kept.'
+          : 'Your pending post is on the Wall. Your current draft has been kept. Open the Wall to see the recovered post; it may be for a different beer.',
+      );
+      // No activity list remains here. Do not navigate with the current beer:
+      // the persisted post may belong to a different beer (or none).
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not recover the pending Wall post. Your current draft has been kept.';
+      setWallError(message);
+      Alert.alert('Retry failed', message);
+    } finally {
+      postingBeerWallRef.current = false;
+      setPosting(false);
     }
   };
 
@@ -637,24 +692,32 @@ export function NativeBeerScreen({ mode = 'calendar', onBeerWallPostSuccess }: N
     </View>
   );
 
-  const renderWallMediaPreview = (media: PickedMedia, onRemove: () => void, disabled: boolean) => (
-    <View style={styles.wallPreviewWrap}>
-      {media.mediaType === 'video' ? (
-        <View style={styles.wallPreviewVideo}>
-          <Text style={styles.wallPreviewVideoIcon}>🎥</Text>
-          <Text style={styles.wallPreviewVideoText} numberOfLines={2}>{media.fileName}</Text>
+  const renderWallMediaPreview = (
+    mediaItems: PickedMedia[],
+    onRemove: (index: number) => void,
+    disabled: boolean,
+  ) => (
+    <View style={styles.wallPreviewGrid}>
+      {mediaItems.map((media, index) => (
+        <View key={`${media.uri}-${index}`} style={styles.wallPreviewWrap}>
+          {media.mediaType === 'video' ? (
+            <View style={styles.wallPreviewVideo}>
+              <Text style={styles.wallPreviewVideoIcon}>🎥</Text>
+              <Text style={styles.wallPreviewVideoText} numberOfLines={2}>{media.fileName}</Text>
+            </View>
+          ) : (
+            <Image source={{ uri: media.uri }} style={styles.wallPreviewImage} resizeMode="cover" />
+          )}
+          <TouchableOpacity
+            style={[styles.wallPreviewRemove, disabled && styles.wallButtonDisabled]}
+            onPress={() => onRemove(index)}
+            disabled={disabled}
+            activeOpacity={0.78}
+          >
+            <Text style={styles.wallPreviewRemoveText}>✕</Text>
+          </TouchableOpacity>
         </View>
-      ) : (
-        <Image source={{ uri: media.uri }} style={styles.wallPreviewImage} resizeMode="cover" />
-      )}
-      <TouchableOpacity
-        style={[styles.wallPreviewRemove, disabled && styles.wallButtonDisabled]}
-        onPress={onRemove}
-        disabled={disabled}
-        activeOpacity={0.78}
-      >
-        <Text style={styles.wallPreviewRemoveText}>✕</Text>
-      </TouchableOpacity>
+      ))}
     </View>
   );
 
@@ -688,8 +751,8 @@ export function NativeBeerScreen({ mode = 'calendar', onBeerWallPostSuccess }: N
   );
 
   const renderSelectedWallPanel = (beer: Beer) => {
-    const mediaBusy = selectedWallPosting || selectedWallPickingMedia;
-    const canPublish = Boolean(user && (selectedWallPostText.trim() || selectedWallMedia) && !mediaBusy);
+    const mediaBusy = selectedWallPosting || todayWallPosting || selectedWallPickingMedia || todayWallPickingMedia;
+    const canPublish = Boolean(user && (selectedWallPostText.trim() || selectedWallMedia.length > 0) && !mediaBusy);
 
     return (
       <View style={styles.wallHubCard}>
@@ -711,7 +774,13 @@ export function NativeBeerScreen({ mode = 'calendar', onBeerWallPostSuccess }: N
               editable={!mediaBusy}
               textAlignVertical="top"
             />
-            {selectedWallMedia ? renderWallMediaPreview(selectedWallMedia, () => setSelectedWallMedia(null), mediaBusy) : null}
+            {selectedWallMedia.length > 0
+              ? renderWallMediaPreview(
+                  selectedWallMedia,
+                  (index) => setSelectedWallMedia((current) => current.filter((_, mediaIndex) => mediaIndex !== index)),
+                  mediaBusy,
+                )
+              : null}
             {renderWallMediaButtons('selected', mediaBusy, selectedWallPickingMedia)}
             <View style={styles.wallActionRow}>
               <TouchableOpacity
@@ -727,6 +796,15 @@ export function NativeBeerScreen({ mode = 'calendar', onBeerWallPostSuccess }: N
                 )}
               </TouchableOpacity>
             </View>
+            <TouchableOpacity
+              style={[styles.wallMediaButton, mediaBusy && styles.wallButtonDisabled]}
+              onPress={() => void handleRetryPendingWallPost('selected')}
+              disabled={mediaBusy}
+              accessibilityRole="button"
+              activeOpacity={0.78}
+            >
+              <Text style={styles.wallMediaButtonText}>Retry pending post</Text>
+            </TouchableOpacity>
             {selectedWallPosted ? <Text style={styles.wallSuccessText}>Posted to the Wall for this beer.</Text> : null}
           </>
         ) : (
@@ -740,8 +818,8 @@ export function NativeBeerScreen({ mode = 'calendar', onBeerWallPostSuccess }: N
 
   // Renders the inline post-to-Wall composer for today's beer (Your Beer tab)
   const renderTodayWallPanel = (beer: Beer) => {
-    const mediaBusy = todayWallPosting || todayWallPickingMedia;
-    const canPublish = Boolean(user && (todayWallPostText.trim() || todayWallMedia) && !mediaBusy);
+    const mediaBusy = selectedWallPosting || todayWallPosting || selectedWallPickingMedia || todayWallPickingMedia;
+    const canPublish = Boolean(user && (todayWallPostText.trim() || todayWallMedia.length > 0) && !mediaBusy);
 
     return (
       <View style={styles.wallHubCard}>
@@ -763,7 +841,13 @@ export function NativeBeerScreen({ mode = 'calendar', onBeerWallPostSuccess }: N
               editable={!mediaBusy}
               textAlignVertical="top"
             />
-            {todayWallMedia ? renderWallMediaPreview(todayWallMedia, () => setTodayWallMedia(null), mediaBusy) : null}
+            {todayWallMedia.length > 0
+              ? renderWallMediaPreview(
+                  todayWallMedia,
+                  (index) => setTodayWallMedia((current) => current.filter((_, mediaIndex) => mediaIndex !== index)),
+                  mediaBusy,
+                )
+              : null}
             {renderWallMediaButtons('today', mediaBusy, todayWallPickingMedia)}
             <View style={styles.wallActionRow}>
               <TouchableOpacity
@@ -779,6 +863,15 @@ export function NativeBeerScreen({ mode = 'calendar', onBeerWallPostSuccess }: N
                 )}
               </TouchableOpacity>
             </View>
+            <TouchableOpacity
+              style={[styles.wallMediaButton, mediaBusy && styles.wallButtonDisabled]}
+              onPress={() => void handleRetryPendingWallPost('today')}
+              disabled={mediaBusy}
+              accessibilityRole="button"
+              activeOpacity={0.78}
+            >
+              <Text style={styles.wallMediaButtonText}>Retry pending post</Text>
+            </TouchableOpacity>
             {todayWallPosted ? <Text style={styles.wallSuccessText}>Posted to the Wall for this beer.</Text> : null}
           </>
         ) : (
@@ -1998,9 +2091,14 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     textAlignVertical: 'top',
   },
+  wallPreviewGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 12,
+  },
   wallPreviewWrap: {
     alignSelf: 'flex-start',
-    marginTop: 12,
     maxWidth: '100%',
   },
   wallPreviewImage: {

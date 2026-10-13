@@ -22,9 +22,10 @@ import { WebView, WebViewMessageEvent, WebViewNavigation } from 'react-native-we
 import { useAuth } from './src/features/auth/AuthProvider';
 import { NativeAppShell } from './src/navigation/NativeAppShell';
 import { supabase } from './src/lib/supabase';
+import { HHS_WEB_ORIGIN, HHS_LOCAL_TEST, HHS_WEBVIEW_ORIGINS, isHhsInternalUrl } from './src/config/env';
 import { HHS_COLORS, HHS_STYLES, HHS_TYPOGRAPHY } from './src/theme/hhsTheme';
 
-const HHS_ORIGIN = 'https://hallowedhopsociety.com';
+const HHS_ORIGIN = HHS_WEB_ORIGIN;
 const HOME_URL = `${HHS_ORIGIN}/`;
 const BEER_URL = `${HHS_ORIGIN}/beers`;
 const HHS_HOSTS = new Set(['hallowedhopsociety.com', 'www.hallowedhopsociety.com']);
@@ -343,12 +344,7 @@ const hhsNativeBridgeJavaScript = `
 `;
 
 function isInternalUrl(url: string) {
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === 'https:' && HHS_HOSTS.has(parsed.hostname);
-  } catch {
-    return false;
-  }
+  return isHhsInternalUrl(url);
 }
 
 function isInternalDocumentNavigationUrl(url?: string | null) {
@@ -356,7 +352,7 @@ function isInternalDocumentNavigationUrl(url?: string | null) {
 
   try {
     const parsed = new URL(url);
-    if (parsed.protocol !== 'https:' || !HHS_HOSTS.has(parsed.hostname)) return false;
+    if (!isInternalUrl(url)) return false;
 
     const pathname = parsed.pathname || '/';
     if (
@@ -403,7 +399,8 @@ function isSameDocumentUrl(a?: string | null, b?: string | null) {
 function isFeedbackUrl(url: string) {
   try {
     const parsed = new URL(url);
-    return HHS_HOSTS.has(parsed.hostname) && parsed.pathname.replace(/\/$/, '') === '/feedback';
+    return (HHS_LOCAL_TEST ? isInternalUrl(url) : HHS_HOSTS.has(parsed.hostname)) &&
+      parsed.pathname.replace(/\/$/, '') === '/feedback';
   } catch {
     return false;
   }
@@ -721,6 +718,7 @@ function HhsWebViewFallbackApp({ initialPath }: { initialPath?: string }) {
 
   const handleShouldStartLoad = useCallback((request: { url: string; isTopFrame?: boolean }) => {
     const { url } = request;
+    if (HHS_LOCAL_TEST && !isInternalUrl(url)) return false;
 
     if (
       url === 'about:blank' ||
@@ -1260,7 +1258,7 @@ function HhsWebViewFallbackApp({ initialPath }: { initialPath?: string }) {
           source={{ uri: initialUrl }}
           style={styles.webView}
           containerStyle={styles.webViewContainer}
-          originWhitelist={['https://*', 'mailto:*', 'tel:*', 'venmo:*']}
+          originWhitelist={HHS_WEBVIEW_ORIGINS}
           injectedJavaScriptBeforeContentLoaded={injectedJavaScriptBeforeContentLoaded}
           injectedJavaScript={hhsNativeBridgeJavaScript}
           javaScriptEnabled

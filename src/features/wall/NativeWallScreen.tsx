@@ -25,17 +25,16 @@ import { getAuthenticatedApiHeaders } from '../../lib/nativeApiAuth';
 import { HHS_COLORS, HHS_STYLES, HHS_TYPOGRAPHY } from '../../theme/hhsTheme';
 import {
   buildWallApiUrl as buildApiUrl,
-  insertPostDirectly,
   patchPostViaWallApi,
   pickWallMedia,
-  postViaWallApi,
   readWallApiError as readApiError,
-  uploadPostMedia,
   type PickedMedia,
 } from './wallPostService';
+import { retryPendingWallPost, submitWallPost } from './wallSubmission';
 
 const PAGE_SIZE = 15;
 const MAX_WALL_MEDIA_ATTACHMENTS = 3;
+const MAX_VISIBLE_WALL_MEDIA = 4;
 const VIDEO_EXTENSION_RE = /\.(mp4|mov|m4v|webm|3gp|3gpp)(?:$|[?#])/i;
 
 const REACTIONS = [
@@ -73,6 +72,7 @@ type WallPost = {
   id: string;
   content: string;
   photo_url: string | null;
+  media?: WallMediaPayload[] | null;
   media_url?: string | null;
   image_url?: string | null;
   thumbnail_url?: string | null;
@@ -92,6 +92,13 @@ type WallMediaAttachment = {
   id?: string;
   media_url: string;
   media_type: string;
+  thumbnail_url?: string | null;
+  sort_order?: number | null;
+};
+
+type WallMediaPayload = {
+  media_url?: string | null;
+  media_type?: string | null;
   thumbnail_url?: string | null;
   sort_order?: number | null;
 };
@@ -160,7 +167,7 @@ function getWallMedia(post: WallPost): WallMediaInfo | null {
 }
 
 function getPostMedia(post: WallPost): WallMediaInfo[] {
-  const normalized = [...(post.wall_media || [])]
+  const fromWallMedia = [...(post.wall_media || [])]
     .filter((item) => item.media_url)
     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
     .map((item) => {
@@ -173,6 +180,22 @@ function getPostMedia(post: WallPost): WallMediaInfo[] {
         fullSizeUrl: item.media_url,
       } satisfies WallMediaInfo;
     });
+
+  const fromPostMedia = [...(Array.isArray(post.media) ? post.media : [])]
+    .filter((item): item is WallMediaPayload & { media_url: string } => Boolean(item?.media_url))
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    .map((item) => {
+      const mediaType = item.media_type?.toLowerCase().startsWith('video') || VIDEO_EXTENSION_RE.test(item.media_url)
+        ? 'video'
+        : 'image';
+      return {
+        mediaType,
+        previewUrl: mediaType === 'image' ? item.thumbnail_url || item.media_url : item.media_url,
+        fullSizeUrl: item.media_url,
+      } satisfies WallMediaInfo;
+    });
+
+  const normalized = fromWallMedia.length >= fromPostMedia.length ? fromWallMedia : fromPostMedia;
   if (normalized.length > 0) return normalized;
   const legacyMedia = getWallMedia(post);
   return legacyMedia ? [legacyMedia] : [];
@@ -252,6 +275,7 @@ export function NativeWallScreen({ initialBeerContext = null }: { initialBeerCon
   const insets = useSafeAreaInsets();
   const mountedRef = useRef(true);
   const pickingMediaRef = useRef(false);
+  const postingRef = useRef(false);
 
   const [posts, setPosts] = useState<WallPost[]>([]);
   const [loading, setLoading] = useState(true);
@@ -387,7 +411,7 @@ export function NativeWallScreen({ initialBeerContext = null }: { initialBeerCon
   }, []);
 
   const handlePickMedia = useCallback(async (source: 'photo-library' | 'video-library' | 'camera') => {
-    if (pickingMediaRef.current || !mountedRef.current) return;
+    if (pickingMediaRef.current || postingRef.current || !mountedRef.current) return;
     if (pickedMedia.length >= MAX_WALL_MEDIA_ATTACHMENTS) {
       Alert.alert('Media limit reached', `Wall posts support up to ${MAX_WALL_MEDIA_ATTACHMENTS} attachments in this phase.`);
       return;
@@ -395,9 +419,10 @@ export function NativeWallScreen({ initialBeerContext = null }: { initialBeerCon
     pickingMediaRef.current = true;
     setPickingMedia(true);
     try {
-      const media = await pickWallMedia(source);
-      if (media && mountedRef.current) {
-        setPickedMedia((current) => [...current, media].slice(0, MAX_WALL_MEDIA_ATTACHMENTS));
+      const remainingSlots = MAX_WALL_MEDIA_ATTACHMENTS - pickedMedia.length;
+      const media = await pickWallMedia(source, remainingSlots);
+      if (media.length > 0 && mountedRef.current) {
+        setPickedMedia((current) => [...current, ...media].slice(0, MAX_WALL_MEDIA_ATTACHMENTS));
       }
     } finally {
       pickingMediaRef.current = false;
@@ -411,37 +436,58 @@ export function NativeWallScreen({ initialBeerContext = null }: { initialBeerCon
   }, []);
 
   const handlePost = useCallback(async () => {
-    if (!user?.id || !canPost) return;
+    if (!user?.id || !canPost || postingRef.current || pickingMediaRef.current) return;
+    postingRef.current = true;
     setPosting(true);
     setError(null);
 
     try {
-      const content = composerText.trim();
-      const uploadedMedia = pickedMedia.length > 0
-        ? await Promise.all(pickedMedia.map((item) => uploadPostMedia(user.id, item)))
-        : [];
-      let postId: string | null = null;
-      try {
-        postId = await postViaWallApi(user.id, content, uploadedMedia, filterBeerId, true);
-      } catch (apiError) {
-        console.warn('[HHS native wall] post API failed; falling back to Supabase insert:', apiError instanceof Error ? apiError.message : apiError);
-        postId = await insertPostDirectly(user.id, content, uploadedMedia, filterBeerId, true);
-      }
+      const postId = await submitWallPost(user.id, {
+        content: composerText,
+        beerId: filterBeerId,
+        media: pickedMedia,
+      });
 
       clearComposer();
-      if (postId) {
+      try {
         const post = await fetchWallPost(postId);
-        if (post) setPosts((prev) => [post, ...prev]);
+        if (post) setPosts((prev) => [post, ...prev.filter((item) => item.id !== postId)]);
         else await refreshWall();
-      } else {
-        await refreshWall();
+      } catch {
+        Alert.alert('Post published', 'Your post was saved, but the Wall could not refresh. Refresh the Wall to see it; do not post it again.');
       }
     } catch (postError) {
       Alert.alert('Post failed', postError instanceof Error ? postError.message : 'Could not publish this post.');
     } finally {
+      postingRef.current = false;
       setPosting(false);
     }
   }, [canPost, clearComposer, composerText, filterBeerId, pickedMedia, refreshWall, user?.id]);
+
+  const handleRetryPendingPost = useCallback(async () => {
+    if (!user?.id || postingRef.current || pickingMediaRef.current) return;
+    postingRef.current = true;
+    setPosting(true);
+    try {
+      const postId = await retryPendingWallPost(user.id);
+      if (postId === null) {
+        Alert.alert('No pending post', 'There is no pending Wall post for this account. Your current draft has been kept.');
+        return;
+      }
+      Alert.alert('Pending post published', 'Your pending post is on the Wall. Your current draft has been kept. The recovered post may be outside the current beer filter.');
+      // Refresh the current filter, never attach the recovered post to this beer.
+      try {
+        await refreshWall();
+      } catch {
+        Alert.alert('Post published', 'Your post was saved, but the Wall could not refresh. Refresh the Wall to see it; do not post it again.');
+      }
+    } catch (retryError) {
+      Alert.alert('Retry failed', retryError instanceof Error ? retryError.message : 'Could not recover the pending Wall post. Your current draft has been kept.');
+    } finally {
+      postingRef.current = false;
+      setPosting(false);
+    }
+  }, [refreshWall, user?.id]);
 
   const handleReact = useCallback(async (postId: string, reaction: ReactionKey) => {
     if (!user?.id) return;
@@ -656,6 +702,7 @@ export function NativeWallScreen({ initialBeerContext = null }: { initialBeerCon
           <TextInput
             value={composerText}
             onChangeText={setComposerText}
+            editable={!mediaButtonsDisabled}
             placeholder={filterBeerId ? 'Post about this beer...' : 'Share your thoughts with the Society...'}
             placeholderTextColor={HHS_COLORS.muted}
             multiline
@@ -677,6 +724,7 @@ export function NativeWallScreen({ initialBeerContext = null }: { initialBeerCon
                   )}
                   <TouchableOpacity
                     style={styles.previewRemove}
+                    disabled={mediaButtonsDisabled}
                     onPress={() => setPickedMedia((current) => current.filter((_, mediaIndex) => mediaIndex !== index))}
                     activeOpacity={0.78}
                   >
@@ -728,6 +776,15 @@ export function NativeWallScreen({ initialBeerContext = null }: { initialBeerCon
               )}
             </TouchableOpacity>
           </View>
+          <TouchableOpacity
+            style={[styles.ghostButton, mediaButtonsDisabled && styles.ghostButtonDisabled]}
+            onPress={handleRetryPendingPost}
+            disabled={!signedInUserId || mediaButtonsDisabled}
+            accessibilityRole="button"
+            activeOpacity={0.78}
+          >
+            <Text style={[styles.ghostButtonText, mediaButtonsDisabled && styles.ghostButtonTextDisabled]}>Retry pending post</Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.dividerRow}>
@@ -944,10 +1001,70 @@ function PostCard({
   }, [cancelCommentEdit, commentEditText, onEditComment, post, savingCommentId]);
 
   const mediaItems = getPostMedia(post);
-  const hasMediaGrid = mediaItems.length > 1;
+  const visibleMediaItems = mediaItems.slice(0, MAX_VISIBLE_WALL_MEDIA);
+  const hiddenMediaCount = Math.max(0, mediaItems.length - visibleMediaItems.length);
+  const secondaryMediaItems = visibleMediaItems.slice(1);
   const updatedAtMs = post.updated_at ? new Date(post.updated_at).getTime() : 0;
   const createdAtMs = new Date(post.created_at).getTime();
   const isEdited = Boolean(updatedAtMs && updatedAtMs - createdAtMs > 1000);
+
+  const renderMediaTile = (media: WallMediaInfo, index: number, isPrimary: boolean, overflowCount = 0) => {
+    const key = `${media.fullSizeUrl}-${index}`;
+    const frameStyle = [
+      styles.mediaTile,
+      isPrimary ? styles.mediaTilePrimary : styles.mediaTileSecondary,
+    ];
+    const badgeText = media.mediaType === 'video' ? '▶' : '✦';
+    const overflowOverlay = overflowCount > 0 ? (
+      <View pointerEvents="none" style={styles.mediaOverflowOverlay}>
+        <Text style={styles.mediaOverflowText}>+{overflowCount}</Text>
+      </View>
+    ) : null;
+
+    if (media.mediaType === 'video') {
+      return (
+        <View key={key} style={frameStyle}>
+          <WebView
+            source={{ html: getPostVideoHtml(media.fullSizeUrl) }}
+            style={styles.postVideoWebView}
+            allowsInlineMediaPlayback
+            mediaPlaybackRequiresUserAction={false}
+            javaScriptEnabled={false}
+            domStorageEnabled={false}
+            scrollEnabled={false}
+          />
+          <View pointerEvents="none" style={styles.mediaTypeBadge} accessibilityLabel="Video attachment">
+            <Text style={styles.mediaTypeBadgeText}>{badgeText}</Text>
+          </View>
+          {overflowOverlay}
+        </View>
+      );
+    }
+
+    return (
+      <TouchableOpacity
+        key={key}
+        style={frameStyle}
+        onPress={() => onOpenPhoto(media.fullSizeUrl)}
+        activeOpacity={0.88}
+      >
+        <Image
+          source={getCachedImageSource(media.previewUrl)}
+          style={styles.mediaTileImage}
+          resizeMode="cover"
+          onLoadEnd={() => {
+            if (media.fullSizeUrl !== media.previewUrl) {
+              void Image.prefetch(media.fullSizeUrl).catch(() => undefined);
+            }
+          }}
+        />
+        <View pointerEvents="none" style={styles.mediaTypeBadge} accessibilityLabel="Photo attachment">
+          <Text style={styles.mediaTypeBadgeText}>{badgeText}</Text>
+        </View>
+        {overflowOverlay}
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <View style={styles.postCard}>
@@ -1013,45 +1130,22 @@ function PostCard({
         post.content ? <Text style={styles.postContent}>{post.content}</Text> : null
       )}
 
-      {mediaItems.length > 0 ? (
-        <View style={hasMediaGrid ? styles.mediaGrid : styles.mediaSingle}>
-          {mediaItems.map((media, index) => {
-            const key = `${media.fullSizeUrl}-${index}`;
-            if (media.mediaType === 'video') {
-              return (
-                <View key={key} style={[styles.videoWrap, hasMediaGrid && styles.mediaGridItem]}>
-                  <WebView
-                    source={{ html: getPostVideoHtml(media.fullSizeUrl) }}
-                    style={styles.postVideoWebView}
-                    allowsInlineMediaPlayback
-                    mediaPlaybackRequiresUserAction={false}
-                    javaScriptEnabled={false}
-                    domStorageEnabled={false}
-                    scrollEnabled={false}
-                  />
-                </View>
-              );
-            }
-            return (
-              <TouchableOpacity
-                key={key}
-                style={[styles.photoWrap, hasMediaGrid && styles.mediaGridItem]}
-                onPress={() => onOpenPhoto(media.fullSizeUrl)}
-                activeOpacity={0.88}
-              >
-                <Image
-                  source={getCachedImageSource(media.previewUrl)}
-                  style={[styles.postPhoto, hasMediaGrid && styles.mediaGridPhoto]}
-                  resizeMode="cover"
-                  onLoadEnd={() => {
-                    if (media.fullSizeUrl !== media.previewUrl) {
-                      void Image.prefetch(media.fullSizeUrl).catch(() => undefined);
-                    }
-                  }}
-                />
-              </TouchableOpacity>
-            );
-          })}
+      {visibleMediaItems.length > 0 ? (
+        <View style={styles.mediaMosaic}>
+          {mediaItems.length > 1 ? (
+            <View style={styles.mediaCountPill}>
+              <Text style={styles.mediaCountText}>✦ {mediaItems.length} media</Text>
+            </View>
+          ) : null}
+          {renderMediaTile(visibleMediaItems[0], 0, true)}
+          {secondaryMediaItems.length > 0 ? (
+            <View style={styles.mediaSecondaryRow}>
+              {secondaryMediaItems.map((media, secondaryIndex) => {
+                const isLastVisible = secondaryIndex === secondaryMediaItems.length - 1;
+                return renderMediaTile(media, secondaryIndex + 1, false, isLastVisible ? hiddenMediaCount : 0);
+              })}
+            </View>
+          ) : null}
         </View>
       ) : null}
 
@@ -1619,42 +1713,88 @@ const styles = StyleSheet.create({
     color: HHS_COLORS.background,
     fontSize: 12,
   },
-  mediaSingle: {
+  mediaMosaic: {
     alignSelf: 'stretch',
+    marginTop: 12,
+    position: 'relative',
   },
-  mediaGrid: {
-    alignSelf: 'stretch',
+  mediaCountPill: {
+    backgroundColor: 'rgba(0,0,0,0.62)',
+    borderColor: 'rgba(255,255,255,0.18)',
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    position: 'absolute',
+    right: 10,
+    top: 10,
+    zIndex: 4,
+  },
+  mediaCountText: {
+    ...HHS_TYPOGRAPHY.button,
+    color: HHS_COLORS.gold,
+    fontSize: 10,
+    letterSpacing: 0.7,
+  },
+  mediaSecondaryRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: 8,
-    marginTop: 12,
+    marginTop: 8,
   },
-  mediaGridItem: {
-    flexBasis: '48%',
-    flexGrow: 1,
-    marginTop: 0,
-    minWidth: 140,
+  mediaTile: {
+    backgroundColor: '#000',
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 10,
+    borderWidth: 1,
+    overflow: 'hidden',
+    position: 'relative',
   },
-  photoWrap: {
-    alignSelf: 'stretch',
-    marginTop: 12,
-    maxWidth: '100%',
-  },
-  postPhoto: {
-    borderRadius: 8,
-    height: 250,
+  mediaTilePrimary: {
+    height: 265,
     width: '100%',
   },
-  mediaGridPhoto: {
-    height: 150,
+  mediaTileSecondary: {
+    flex: 1,
+    height: 118,
+    minWidth: 0,
   },
-  videoWrap: {
-    alignSelf: 'stretch',
-    backgroundColor: '#000',
-    borderRadius: 8,
-    height: 250,
-    marginTop: 12,
-    overflow: 'hidden',
+  mediaTileImage: {
+    height: '100%',
+    width: '100%',
+  },
+  mediaTypeBadge: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.58)',
+    borderColor: 'rgba(255,255,255,0.16)',
+    borderRadius: 999,
+    borderWidth: 1,
+    bottom: 8,
+    height: 24,
+    justifyContent: 'center',
+    left: 8,
+    position: 'absolute',
+    width: 24,
+  },
+  mediaTypeBadgeText: {
+    ...HHS_TYPOGRAPHY.button,
+    color: '#fff',
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  mediaOverflowOverlay: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.58)',
+    bottom: 0,
+    justifyContent: 'center',
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+  },
+  mediaOverflowText: {
+    ...HHS_TYPOGRAPHY.display,
+    color: '#fff',
+    fontSize: 26,
   },
   postVideoWebView: {
     backgroundColor: '#000',

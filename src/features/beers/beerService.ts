@@ -1,6 +1,7 @@
 import { supabase } from '../../lib/supabase';
 import type { Beer, BeerRating, BeerRatingSummary, BeerWallActivity, UserBeerRatingListItem } from './types';
-import { insertPostDirectly, postViaWallApi, type UploadedPostMedia } from '../wall/wallPostService';
+import type { PickedMedia } from '../wall/wallPostService';
+import { submitWallPost } from '../wall/wallSubmission';
 
 const BEER_LIST_SELECT = [
   'id',
@@ -196,19 +197,8 @@ export async function createBeerWallPost(
   userId: string,
   beerId: string,
   content: string,
-  media: UploadedPostMedia | null = null,
-): Promise<string | null> {
-  const trimmed = content.trim();
-  if (!trimmed && !media) throw new Error('Write a Wall post before publishing.');
-
-  try {
-    return await postViaWallApi(userId, trimmed, media, beerId, true);
-  } catch (apiError) {
-    console.warn(
-      '[HHS native beer] Wall post API failed; falling back to Supabase insert:',
-      apiError instanceof Error ? apiError.message : apiError,
-    );
-    return insertPostDirectly(userId, trimmed, media, beerId, true);
-  }
+  media: PickedMedia[] = [],
+): Promise<string> {
+  return submitWallPost(userId, { content, beerId, media });
 }
 

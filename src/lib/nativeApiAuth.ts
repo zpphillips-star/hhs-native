@@ -10,16 +10,24 @@ export async function getAuthenticatedApiHeaders(expectedUserId: string): Promis
     throw new Error(error.message);
   }
 
-  const session = data.session;
+  let session = data.session;
+  if (session?.user?.id !== expectedUserId) {
+    throw new Error('Sign in as the original account to continue this request.');
+  }
+  if (session.expires_at && session.expires_at * 1000 <= Date.now() + 30_000) {
+    const refreshed = await supabase.auth.refreshSession();
+    if (refreshed.error) throw new Error(refreshed.error.message);
+    session = refreshed.data.session;
+  }
   const accessToken = session?.access_token;
   const sessionUserId = session?.user?.id;
 
   if (!accessToken || !sessionUserId) {
-    throw new Error('Your session expired. Sign in again to manage notifications.');
+    throw new Error('Your session expired. Sign in again to continue.');
   }
 
   if (sessionUserId !== expectedUserId) {
-    throw new Error('Signed-in user does not match the notification settings request.');
+    throw new Error('Sign in as the original account to continue this request.');
   }
 
   return {
