@@ -35,6 +35,7 @@ import {
 } from './wallPostService';
 
 const PAGE_SIZE = 15;
+const MAX_WALL_MEDIA_ATTACHMENTS = 3;
 const VIDEO_EXTENSION_RE = /\.(mp4|mov|m4v|webm|3gp|3gpp)(?:$|[?#])/i;
 
 const REACTIONS = [
@@ -76,6 +77,7 @@ type WallPost = {
   image_url?: string | null;
   thumbnail_url?: string | null;
   media_type?: string | null;
+  wall_media?: WallMediaAttachment[] | null;
   created_at: string;
   updated_at?: string | null;
   beer_id: string | null;
@@ -86,6 +88,13 @@ type WallPost = {
   beers: { name: string; brewery: string; day_number: number | null; style: string | null; abv: number | null } | null;
 };
 
+type WallMediaAttachment = {
+  id?: string;
+  media_url: string;
+  media_type: string;
+  thumbnail_url?: string | null;
+  sort_order?: number | null;
+};
 
 type NativeWallError = {
   title: string;
@@ -150,6 +159,33 @@ function getWallMedia(post: WallPost): WallMediaInfo | null {
   };
 }
 
+function getPostMedia(post: WallPost): WallMediaInfo[] {
+  const normalized = [...(post.wall_media || [])]
+    .filter((item) => item.media_url)
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    .map((item) => {
+      const mediaType = item.media_type?.toLowerCase().startsWith('video') || VIDEO_EXTENSION_RE.test(item.media_url)
+        ? 'video'
+        : 'image';
+      return {
+        mediaType,
+        previewUrl: mediaType === 'image' ? item.thumbnail_url || item.media_url : item.media_url,
+        fullSizeUrl: item.media_url,
+      } satisfies WallMediaInfo;
+    });
+  if (normalized.length > 0) return normalized;
+  const legacyMedia = getWallMedia(post);
+  return legacyMedia ? [legacyMedia] : [];
+}
+
+function isMissingWallMediaError(error: { message?: string; code?: string } | null | undefined) {
+  if (!error) return false;
+  const message = error.message || '';
+  return error.code === 'PGRST200' ||
+    error.code === 'PGRST204' ||
+    /wall_media|schema cache|relationship|does not exist|Could not find/i.test(message);
+}
+
 
 function getPostVideoHtml(mediaUrl: string) {
   const src = JSON.stringify(mediaUrl);
@@ -187,14 +223,24 @@ async function fetchProfilesMap() {
 
 async function fetchWallPost(postId: string) {
   if (!supabase) return null;
-  const [{ data, error }, profileMap] = await Promise.all([
-    supabase
+  const postQuery = supabase
+      .from('posts')
+      .select('*, wall_media(*), post_reactions(*), post_comments(*), beers(name, brewery, day_number, style, abv)')
+      .eq('id', postId)
+      .maybeSingle();
+  let [{ data, error }, profileMap] = await Promise.all([
+    postQuery,
+    fetchProfilesMap(),
+  ]);
+  if (isMissingWallMediaError(error)) {
+    const fallback = await supabase
       .from('posts')
       .select('*, post_reactions(*), post_comments(*), beers(name, brewery, day_number, style, abv)')
       .eq('id', postId)
-      .maybeSingle(),
-    fetchProfilesMap(),
-  ]);
+      .maybeSingle();
+    data = fallback.data;
+    error = fallback.error;
+  }
   if (error) throw error;
   if (!data) return null;
   return mergeProfiles([data as WallPost], profileMap)[0];
@@ -215,7 +261,7 @@ export function NativeWallScreen({ initialBeerContext = null }: { initialBeerCon
   const [page, setPage] = useState(0);
   const [error, setError] = useState<NativeWallError | null>(null);
   const [composerText, setComposerText] = useState('');
-  const [pickedMedia, setPickedMedia] = useState<PickedMedia | null>(null);
+  const [pickedMedia, setPickedMedia] = useState<PickedMedia[]>([]);
   const [posting, setPosting] = useState(false);
   const [pickingMedia, setPickingMedia] = useState(false);
   const [filterBeerId, setFilterBeerId] = useState<string | null>(initialBeerContext?.id ?? null);
@@ -227,7 +273,7 @@ export function NativeWallScreen({ initialBeerContext = null }: { initialBeerCon
   const [lightboxLoading, setLightboxLoading] = useState(false);
 
   const signedInUserId = user?.id ?? null;
-  const canPost = Boolean(signedInUserId && (composerText.trim() || pickedMedia) && !posting && !pickingMedia);
+  const canPost = Boolean(signedInUserId && (composerText.trim() || pickedMedia.length > 0) && !posting && !pickingMedia);
   const mediaButtonsDisabled = pickingMedia || posting;
 
   useEffect(() => () => {
@@ -264,13 +310,24 @@ export function NativeWallScreen({ initialBeerContext = null }: { initialBeerCon
       const to = from + PAGE_SIZE - 1;
       let query = supabase
         .from('posts')
-        .select('*, post_reactions(*), post_comments(*), beers(name, brewery, day_number, style, abv)')
+        .select('*, wall_media(*), post_reactions(*), post_comments(*), beers(name, brewery, day_number, style, abv)')
         .order('created_at', { ascending: false })
         .range(from, to);
 
       if (beerId) query = query.eq('beer_id', beerId);
 
-      const [{ data, error: fetchError }, profileMap] = await Promise.all([query, fetchProfilesMap()]);
+      let [{ data, error: fetchError }, profileMap] = await Promise.all([query, fetchProfilesMap()]);
+      if (isMissingWallMediaError(fetchError)) {
+        let fallbackQuery = supabase
+          .from('posts')
+          .select('*, post_reactions(*), post_comments(*), beers(name, brewery, day_number, style, abv)')
+          .order('created_at', { ascending: false })
+          .range(from, to);
+        if (beerId) fallbackQuery = fallbackQuery.eq('beer_id', beerId);
+        const fallback = await fallbackQuery;
+        data = fallback.data;
+        fetchError = fallback.error;
+      }
       if (fetchError) throw fetchError;
 
       const incoming = mergeProfiles((data as WallPost[]) || [], profileMap);
@@ -331,20 +388,26 @@ export function NativeWallScreen({ initialBeerContext = null }: { initialBeerCon
 
   const handlePickMedia = useCallback(async (source: 'photo-library' | 'video-library' | 'camera') => {
     if (pickingMediaRef.current || !mountedRef.current) return;
+    if (pickedMedia.length >= MAX_WALL_MEDIA_ATTACHMENTS) {
+      Alert.alert('Media limit reached', `Wall posts support up to ${MAX_WALL_MEDIA_ATTACHMENTS} attachments in this phase.`);
+      return;
+    }
     pickingMediaRef.current = true;
     setPickingMedia(true);
     try {
       const media = await pickWallMedia(source);
-      if (media && mountedRef.current) setPickedMedia(media);
+      if (media && mountedRef.current) {
+        setPickedMedia((current) => [...current, media].slice(0, MAX_WALL_MEDIA_ATTACHMENTS));
+      }
     } finally {
       pickingMediaRef.current = false;
       if (mountedRef.current) setPickingMedia(false);
     }
-  }, []);
+  }, [pickedMedia.length]);
 
   const clearComposer = useCallback(() => {
     setComposerText('');
-    setPickedMedia(null);
+    setPickedMedia([]);
   }, []);
 
   const handlePost = useCallback(async () => {
@@ -354,7 +417,9 @@ export function NativeWallScreen({ initialBeerContext = null }: { initialBeerCon
 
     try {
       const content = composerText.trim();
-      const uploadedMedia = pickedMedia ? await uploadPostMedia(user.id, pickedMedia) : null;
+      const uploadedMedia = pickedMedia.length > 0
+        ? await Promise.all(pickedMedia.map((item) => uploadPostMedia(user.id, item)))
+        : [];
       let postId: string | null = null;
       try {
         postId = await postViaWallApi(user.id, content, uploadedMedia, filterBeerId, true);
@@ -598,19 +663,27 @@ export function NativeWallScreen({ initialBeerContext = null }: { initialBeerCon
             style={styles.composerInput}
             textAlignVertical="top"
           />
-          {pickedMedia ? (
-            <View style={styles.previewWrap}>
-              {pickedMedia.mediaType === 'video' ? (
-                <View style={styles.previewVideo}>
-                  <Text style={styles.previewVideoIcon}>🎥</Text>
-                  <Text style={styles.previewVideoText} numberOfLines={2}>{pickedMedia.fileName}</Text>
+          {pickedMedia.length > 0 ? (
+            <View style={styles.previewGrid}>
+              {pickedMedia.map((item, index) => (
+                <View key={`${item.uri}-${index}`} style={styles.previewWrap}>
+                  {item.mediaType === 'video' ? (
+                    <View style={styles.previewVideo}>
+                      <Text style={styles.previewVideoIcon}>🎥</Text>
+                      <Text style={styles.previewVideoText} numberOfLines={2}>{item.fileName}</Text>
+                    </View>
+                  ) : (
+                    <Image source={{ uri: item.uri }} style={styles.previewImage} resizeMode="cover" />
+                  )}
+                  <TouchableOpacity
+                    style={styles.previewRemove}
+                    onPress={() => setPickedMedia((current) => current.filter((_, mediaIndex) => mediaIndex !== index))}
+                    activeOpacity={0.78}
+                  >
+                    <Text style={styles.previewRemoveText}>✕</Text>
+                  </TouchableOpacity>
                 </View>
-              ) : (
-                <Image source={{ uri: pickedMedia.uri }} style={styles.previewImage} resizeMode="cover" />
-              )}
-              <TouchableOpacity style={styles.previewRemove} onPress={() => setPickedMedia(null)} activeOpacity={0.78}>
-                <Text style={styles.previewRemoveText}>✕</Text>
-              </TouchableOpacity>
+              ))}
             </View>
           ) : null}
           <View style={styles.composerActions}>
@@ -870,11 +943,8 @@ function PostCard({
     }
   }, [cancelCommentEdit, commentEditText, onEditComment, post, savingCommentId]);
 
-  const media = getWallMedia(post);
-  const mediaUrl = media?.fullSizeUrl ?? null;
-  const hasVideo = media?.mediaType === 'video';
-  const imageUrl = media?.mediaType === 'image' ? media.previewUrl : null;
-  const fullSizeImageUrl = media?.mediaType === 'image' ? media.fullSizeUrl : null;
+  const mediaItems = getPostMedia(post);
+  const hasMediaGrid = mediaItems.length > 1;
   const updatedAtMs = post.updated_at ? new Date(post.updated_at).getTime() : 0;
   const createdAtMs = new Date(post.created_at).getTime();
   const isEdited = Boolean(updatedAtMs && updatedAtMs - createdAtMs > 1000);
@@ -943,33 +1013,46 @@ function PostCard({
         post.content ? <Text style={styles.postContent}>{post.content}</Text> : null
       )}
 
-      {hasVideo && mediaUrl ? (
-        <View style={styles.videoWrap}>
-          <WebView
-            source={{ html: getPostVideoHtml(mediaUrl) }}
-            style={styles.postVideoWebView}
-            allowsInlineMediaPlayback
-            mediaPlaybackRequiresUserAction={false}
-            javaScriptEnabled={false}
-            domStorageEnabled={false}
-            scrollEnabled={false}
-          />
+      {mediaItems.length > 0 ? (
+        <View style={hasMediaGrid ? styles.mediaGrid : styles.mediaSingle}>
+          {mediaItems.map((media, index) => {
+            const key = `${media.fullSizeUrl}-${index}`;
+            if (media.mediaType === 'video') {
+              return (
+                <View key={key} style={[styles.videoWrap, hasMediaGrid && styles.mediaGridItem]}>
+                  <WebView
+                    source={{ html: getPostVideoHtml(media.fullSizeUrl) }}
+                    style={styles.postVideoWebView}
+                    allowsInlineMediaPlayback
+                    mediaPlaybackRequiresUserAction={false}
+                    javaScriptEnabled={false}
+                    domStorageEnabled={false}
+                    scrollEnabled={false}
+                  />
+                </View>
+              );
+            }
+            return (
+              <TouchableOpacity
+                key={key}
+                style={[styles.photoWrap, hasMediaGrid && styles.mediaGridItem]}
+                onPress={() => onOpenPhoto(media.fullSizeUrl)}
+                activeOpacity={0.88}
+              >
+                <Image
+                  source={getCachedImageSource(media.previewUrl)}
+                  style={[styles.postPhoto, hasMediaGrid && styles.mediaGridPhoto]}
+                  resizeMode="cover"
+                  onLoadEnd={() => {
+                    if (media.fullSizeUrl !== media.previewUrl) {
+                      void Image.prefetch(media.fullSizeUrl).catch(() => undefined);
+                    }
+                  }}
+                />
+              </TouchableOpacity>
+            );
+          })}
         </View>
-      ) : null}
-
-      {imageUrl ? (
-        <TouchableOpacity style={styles.photoWrap} onPress={() => onOpenPhoto(fullSizeImageUrl || imageUrl)} activeOpacity={0.88}>
-          <Image
-            source={getCachedImageSource(imageUrl)}
-            style={styles.postPhoto}
-            resizeMode="cover"
-            onLoadEnd={() => {
-              if (fullSizeImageUrl && fullSizeImageUrl !== imageUrl) {
-                void Image.prefetch(fullSizeImageUrl).catch(() => undefined);
-              }
-            }}
-          />
-        </TouchableOpacity>
       ) : null}
 
       <View style={styles.reactionRow}>
@@ -1210,9 +1293,14 @@ const styles = StyleSheet.create({
     minHeight: 88,
     padding: 0,
   },
+  previewGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 12,
+  },
   previewWrap: {
     alignSelf: 'flex-start',
-    marginTop: 12,
     maxWidth: '100%',
   },
   previewImage: {
@@ -1531,6 +1619,22 @@ const styles = StyleSheet.create({
     color: HHS_COLORS.background,
     fontSize: 12,
   },
+  mediaSingle: {
+    alignSelf: 'stretch',
+  },
+  mediaGrid: {
+    alignSelf: 'stretch',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  mediaGridItem: {
+    flexBasis: '48%',
+    flexGrow: 1,
+    marginTop: 0,
+    minWidth: 140,
+  },
   photoWrap: {
     alignSelf: 'stretch',
     marginTop: 12,
@@ -1540,6 +1644,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     height: 250,
     width: '100%',
+  },
+  mediaGridPhoto: {
+    height: 150,
   },
   videoWrap: {
     alignSelf: 'stretch',

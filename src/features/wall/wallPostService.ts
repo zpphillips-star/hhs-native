@@ -10,6 +10,7 @@ const MAX_VIDEO_UPLOAD_BYTES = 50 * 1024 * 1024;
 const MAX_VIDEO_DURATION_MS = 90 * 1000;
 const SUPPORTED_VIDEO_MIME_TYPES = ['video/mp4', 'video/quicktime', 'video/webm', 'video/3gpp'] as const;
 const MEDIA_COLUMN_NAMES = ['media_type', 'media_url', 'thumbnail_url', 'media_size_bytes', 'video_duration_ms'] as const;
+const WALL_MEDIA_COLUMN_RE = /wall_media|schema cache|does not exist|Could not find/i;
 
 export type WallMediaSource = 'photo-library' | 'video-library' | 'camera';
 
@@ -28,6 +29,9 @@ export type UploadedPostMedia = {
   thumbnailUrl: string | null;
   mediaSizeBytes: number | null;
   videoDurationMs: number | null;
+  mimeType: string | null;
+  storageBucket: string;
+  storagePath: string | null;
 };
 
 function getMediaExtension(media: PickedMedia) {
@@ -145,6 +149,9 @@ export async function uploadPostMedia(userId: string, media: PickedMedia) {
     thumbnailUrl: null,
     mediaSizeBytes: media.fileSize ?? null,
     videoDurationMs: media.mediaType === 'video' ? media.durationMs ?? null : null,
+    mimeType: media.mimeType,
+    storageBucket: PHOTO_BUCKET,
+    storagePath: path,
   } satisfies UploadedPostMedia;
 }
 
@@ -166,32 +173,44 @@ export async function readWallApiError(response: Response) {
 function getPostPayload(
   userId: string,
   content: string,
-  media: UploadedPostMedia | null,
+  media: UploadedPostMedia | UploadedPostMedia[] | null,
   beerId: string | null,
   includeMediaMetadata: boolean,
 ) {
+  const mediaItems = Array.isArray(media) ? media : media ? [media] : [];
+  const primaryMedia = mediaItems[0] ?? null;
   const payload: Record<string, string | number | null> = {
     user_id: userId,
     content,
     beer_id: beerId,
-    photo_url: media?.mediaUrl ?? null,
-    media_url: media?.mediaUrl ?? null,
-    media_type: media?.mediaType ?? null,
+    photo_url: primaryMedia?.mediaUrl ?? null,
+    media_url: primaryMedia?.mediaUrl ?? null,
+    media_type: primaryMedia?.mediaType ?? null,
   };
 
   if (includeMediaMetadata) {
-    payload.thumbnail_url = media?.thumbnailUrl ?? null;
-    payload.media_size_bytes = media?.mediaSizeBytes ?? null;
-    payload.video_duration_ms = media?.videoDurationMs ?? null;
+    payload.thumbnail_url = primaryMedia?.thumbnailUrl ?? null;
+    payload.media_size_bytes = primaryMedia?.mediaSizeBytes ?? null;
+    payload.video_duration_ms = primaryMedia?.videoDurationMs ?? null;
   }
 
-  return payload;
+  return {
+    ...payload,
+    media: mediaItems.map((item) => ({
+      media_url: item.mediaUrl,
+      media_type: item.mediaType,
+      mime_type: item.mimeType,
+      storage_bucket: item.storageBucket,
+      storage_path: item.storagePath,
+      duration_ms: item.videoDurationMs,
+    })),
+  };
 }
 
 export async function postViaWallApi(
   userId: string,
   content: string,
-  media: UploadedPostMedia | null,
+  media: UploadedPostMedia | UploadedPostMedia[] | null,
   beerId: string | null,
   includeMediaMetadata = true,
 ) {
@@ -214,14 +233,21 @@ function isMissingMediaColumnError(error: { message?: string; code?: string } | 
     /media_(url|type)|thumbnail_url|video_duration_ms|media_size_bytes|column .* does not exist|Could not find .*media_/i.test(message);
 }
 
+function isMissingWallMediaError(error: { message?: string; code?: string } | null): boolean {
+  if (!error) return false;
+  const message = error.message || '';
+  return error.code === 'PGRST204' || WALL_MEDIA_COLUMN_RE.test(message);
+}
+
 export async function insertPostDirectly(
   userId: string,
   content: string,
-  media: UploadedPostMedia | null,
+  media: UploadedPostMedia | UploadedPostMedia[] | null,
   beerId: string | null,
   includeMediaMetadata = true,
 ) {
   if (!supabase) throw new Error('Supabase is not configured for the native app.');
+  const mediaItems = Array.isArray(media) ? media : media ? [media] : [];
   let result = await supabase
     .from('posts')
     .insert(getPostPayload(userId, content, media, beerId, includeMediaMetadata))
@@ -234,13 +260,30 @@ export async function insertPostDirectly(
         user_id: userId,
         content,
         beer_id: beerId,
-        photo_url: media?.mediaUrl ?? null,
+        photo_url: mediaItems[0]?.mediaUrl ?? null,
       })
       .select('id')
       .maybeSingle();
   }
   if (result.error) throw result.error;
-  return (result.data as { id?: string } | null)?.id ?? null;
+  const postId = (result.data as { id?: string } | null)?.id ?? null;
+  if (postId && mediaItems.length > 0 && includeMediaMetadata) {
+    const { error: mediaError } = await supabase
+      .from('wall_media')
+      .insert(mediaItems.map((item, index) => ({
+        post_id: postId,
+        user_id: userId,
+        media_url: item.mediaUrl,
+        media_type: item.mediaType,
+        mime_type: item.mimeType,
+        storage_bucket: item.storageBucket,
+        storage_path: item.storagePath,
+        duration_ms: item.videoDurationMs,
+        sort_order: index,
+      })));
+    if (mediaError && !isMissingWallMediaError(mediaError)) throw mediaError;
+  }
+  return postId;
 }
 
 export async function patchPostViaWallApi(userId: string, postId: string, content: string) {
