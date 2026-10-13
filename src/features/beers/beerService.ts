@@ -1,6 +1,6 @@
 import { supabase } from '../../lib/supabase';
-import { HHS_WEB_ORIGIN } from '../../config/env';
-import type { Beer, BeerRating, BeerRatingSummary, BeerWallActivity } from './types';
+import type { Beer, BeerRating, BeerRatingSummary, BeerWallActivity, UserBeerRatingListItem } from './types';
+import { insertPostDirectly, postViaWallApi, type UploadedPostMedia } from '../wall/wallPostService';
 
 const BEER_LIST_SELECT = [
   'id',
@@ -50,6 +50,33 @@ export async function fetchUserBeerRating(userId: string, beerId: string): Promi
   }
 
   return (data ?? null) as BeerRating | null;
+}
+
+export async function fetchUserBeerRatingList(userId: string): Promise<UserBeerRatingListItem[]> {
+  if (!supabase) {
+    throw new Error('Supabase public env is not configured for the native app.');
+  }
+
+  const [beers, ratingsResult] = await Promise.all([
+    fetchBeers(),
+    supabase
+      .from('ratings')
+      .select('id,user_id,beer_id,stars,notes,created_at')
+      .eq('user_id', userId),
+  ]);
+
+  if (ratingsResult.error) {
+    throw ratingsResult.error;
+  }
+
+  const ratingsByBeerId = new Map(
+    ((ratingsResult.data ?? []) as BeerRating[]).map((rating) => [rating.beer_id, rating]),
+  );
+
+  return beers.map((beer) => ({
+    beer,
+    rating: ratingsByBeerId.get(beer.id) ?? null,
+  }));
 }
 
 export async function fetchBeerRatingSummary(beerId: string): Promise<BeerRatingSummary> {
@@ -107,20 +134,6 @@ export async function upsertUserBeerRating(
   return data as BeerRating;
 }
 
-function buildApiUrl(path: string) {
-  return `${HHS_WEB_ORIGIN}${path}`;
-}
-
-async function readApiError(response: Response) {
-  const text = await response.text();
-  if (!text) return `Request failed (${response.status}).`;
-  try {
-    const json = JSON.parse(text) as { error?: string };
-    return json.error || text;
-  } catch {
-    return text;
-  }
-}
 
 type ProfileRow = {
   id: string;
@@ -179,32 +192,23 @@ export async function fetchBeerWallActivity(beerId: string, limit = 3): Promise<
   });
 }
 
-export async function createBeerWallPost(userId: string, beerId: string, content: string): Promise<string | null> {
+export async function createBeerWallPost(
+  userId: string,
+  beerId: string,
+  content: string,
+  media: UploadedPostMedia | null = null,
+): Promise<string | null> {
   const trimmed = content.trim();
-  if (!trimmed) throw new Error('Write a Wall post before publishing.');
+  if (!trimmed && !media) throw new Error('Write a Wall post before publishing.');
 
   try {
-    const response = await fetch(buildApiUrl('/api/wall/post'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId, beer_id: beerId, content: trimmed, photo_url: null }),
-    });
-    if (!response.ok) throw new Error(await readApiError(response));
-    const json = await response.json() as { post?: { id?: string } };
-    return json.post?.id ?? null;
+    return await postViaWallApi(userId, trimmed, media, beerId, true);
   } catch (apiError) {
-    if (!supabase) throw apiError;
     console.warn(
       '[HHS native beer] Wall post API failed; falling back to Supabase insert:',
       apiError instanceof Error ? apiError.message : apiError,
     );
-    const { data, error } = await supabase
-      .from('posts')
-      .insert({ user_id: userId, beer_id: beerId, content: trimmed, photo_url: null })
-      .select('id')
-      .maybeSingle();
-    if (error) throw error;
-    return (data as { id?: string } | null)?.id ?? null;
+    return insertPostDirectly(userId, trimmed, media, beerId, true);
   }
 }
 

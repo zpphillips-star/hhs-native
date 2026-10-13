@@ -23,9 +23,31 @@ export type RankedBeer = {
   ratingCount: number;
 };
 
+export type MyBeerRatingRow = {
+  beer: Beer;
+  userStars: number;
+  userRatedAt: string | null;
+  societyAvgStars: number | null;
+  societyRatingCount: number;
+};
+
+export type MyBeerRatingSummary = {
+  userAverageStars: number | null;
+  userRatingCount: number;
+  societyAverageStars: number | null;
+  societyRatingCount: number;
+};
+
+export type MyBeerRatingsResult = {
+  summary: MyBeerRatingSummary;
+  rows: MyBeerRatingRow[];
+};
+
 type RatingRow = {
   beer_id: string;
   stars: number;
+  user_id?: string;
+  created_at?: string | null;
 };
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -89,4 +111,78 @@ export async function fetchTopBeers(): Promise<RankedBeer[]> {
   });
 
   return candidates;
+}
+
+/**
+ * Returns the signed-in user's rated beers with the Society average for each
+ * beer, plus summary averages for the My Beers section in The Rankings.
+ */
+export async function fetchMyBeerRatings(userId: string): Promise<MyBeerRatingsResult> {
+  if (!supabase) {
+    throw new Error('Supabase public env is not configured for the native app.');
+  }
+
+  const [beersResult, ratingsResult] = await Promise.all([
+    supabase
+      .from('beers')
+      .select(
+        'id,day_number,name,brewery,style,abv,description,brewery_fact,beer_fact,image_url,created_at',
+      )
+      .order('day_number', { ascending: true }),
+    supabase
+      .from('ratings')
+      .select('beer_id,user_id,stars,created_at'),
+  ]);
+
+  if (beersResult.error) throw beersResult.error;
+  if (ratingsResult.error) throw ratingsResult.error;
+
+  const beers = (beersResult.data ?? []) as Beer[];
+  const ratings = (ratingsResult.data ?? []) as RatingRow[];
+  const ratingsByBeer: Record<string, number[]> = {};
+  const userRatingsByBeer = new Map<string, RatingRow>();
+
+  for (const rating of ratings) {
+    if (!ratingsByBeer[rating.beer_id]) ratingsByBeer[rating.beer_id] = [];
+    ratingsByBeer[rating.beer_id].push(rating.stars);
+
+    if (rating.user_id === userId) {
+      userRatingsByBeer.set(rating.beer_id, rating);
+    }
+  }
+
+  const userStarList = Array.from(userRatingsByBeer.values()).map((rating) => rating.stars);
+  const societyStarList = ratings.map((rating) => rating.stars);
+
+  const average = (stars: number[]) => {
+    if (stars.length === 0) return null;
+    const total = stars.reduce((sum, star) => sum + star, 0);
+    return Math.round((total / stars.length) * 10) / 10;
+  };
+
+  const rows = beers
+    .map((beer) => {
+      const userRating = userRatingsByBeer.get(beer.id);
+      if (!userRating) return null;
+
+      const societyStars = ratingsByBeer[beer.id] ?? [];
+      return {
+        beer,
+        userStars: userRating.stars,
+        userRatedAt: userRating.created_at ?? null,
+        societyAvgStars: average(societyStars),
+        societyRatingCount: societyStars.length,
+      };
+    })
+    .filter((row): row is MyBeerRatingRow => row !== null);
+
+  return {
+    summary: {
+      userAverageStars: average(userStarList),
+      userRatingCount: userStarList.length,
+      societyAverageStars: average(societyStarList),
+      societyRatingCount: societyStarList.length,
+    },
+    rows,
+  };
 }

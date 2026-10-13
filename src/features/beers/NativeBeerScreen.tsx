@@ -6,6 +6,7 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
+  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -32,6 +33,7 @@ import {
   isParticipatingBeerDay,
   useBeerVisibility,
 } from '../membership/beerVisibilityService';
+import { pickWallMedia, uploadPostMedia, type PickedMedia, type WallMediaSource } from '../wall/wallPostService';
 
 const COLORS = HHS_COLORS;
 
@@ -48,7 +50,7 @@ const HHS_MUG_IMAGE = require('../../../assets/mughhs.webp');
 type NativeBeerScreenProps = {
   mode?: 'calendar' | 'yourBeer';
   onOpenWebFallback?: (path?: string) => void;
-  onOpenWallForBeer?: (beer: { id: string; name: string; dayNumber: number; brewery?: string | null }) => void;
+  onBeerWallPostSuccess?: (beerContext: { id: string; name: string; dayNumber: number; brewery?: string | null }) => void;
 };
 
 function formatBeerMeta(beer: Beer) {
@@ -119,7 +121,7 @@ function getCalendarState(now: Date) {
   };
 }
 
-export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
+export function NativeBeerScreen({ mode = 'calendar', onBeerWallPostSuccess }: NativeBeerScreenProps) {
   const { user } = useAuth();
   const beerVisibility = useBeerVisibility(user?.id);
   const [beers, setBeers] = useState<Beer[]>([]);
@@ -130,6 +132,7 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
   const [todayRowY, setTodayRowY] = useState<number | null>(null);
   // Guard: only scroll once per mount; re-mounts when tab is re-selected.
   const hasScrolledToToday = useRef(false);
+  const pickingBeerWallMediaRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -153,11 +156,15 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
   const [selectedWallPostText, setSelectedWallPostText] = useState('');
   const [selectedWallPosting, setSelectedWallPosting] = useState(false);
   const [selectedWallPosted, setSelectedWallPosted] = useState(false);
+  const [selectedWallMedia, setSelectedWallMedia] = useState<PickedMedia | null>(null);
+  const [selectedWallPickingMedia, setSelectedWallPickingMedia] = useState(false);
   // Today wall post / activity state (Your Beer tab)
   const [todayWallError, setTodayWallError] = useState<string | null>(null);
   const [todayWallPostText, setTodayWallPostText] = useState('');
   const [todayWallPosting, setTodayWallPosting] = useState(false);
   const [todayWallPosted, setTodayWallPosted] = useState(false);
+  const [todayWallMedia, setTodayWallMedia] = useState<PickedMedia | null>(null);
+  const [todayWallPickingMedia, setTodayWallPickingMedia] = useState(false);
   const [todayPeekEnabled, setTodayPeekEnabled] = useState(false);
 
   const [now, setNow] = useState(() => getEffectiveNow());
@@ -236,6 +243,16 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
   useEffect(() => {
     setTodayPeekEnabled(false);
   }, [todayBeer?.id, beerVisibility.effectivePreference, beerVisibility.tier]);
+
+  useEffect(() => {
+    setSelectedWallMedia(null);
+    setSelectedWallPickingMedia(false);
+  }, [selectedBeer?.id]);
+
+  useEffect(() => {
+    setTodayWallMedia(null);
+    setTodayWallPickingMedia(false);
+  }, [todayBeer?.id]);
 
   useEffect(() => {
     setTodayRating(null);
@@ -414,10 +431,34 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
     }
   };
 
+  const handleBeerWallMediaPick = async (target: 'selected' | 'today', source: WallMediaSource) => {
+    if (pickingBeerWallMediaRef.current) return;
+    pickingBeerWallMediaRef.current = true;
+    if (target === 'selected') {
+      setSelectedWallPickingMedia(true);
+      setSelectedWallError(null);
+    } else {
+      setTodayWallPickingMedia(true);
+      setTodayWallError(null);
+    }
+
+    try {
+      const media = await pickWallMedia(source);
+      if (media) {
+        if (target === 'selected') setSelectedWallMedia(media);
+        else setTodayWallMedia(media);
+      }
+    } finally {
+      pickingBeerWallMediaRef.current = false;
+      if (target === 'selected') setSelectedWallPickingMedia(false);
+      else setTodayWallPickingMedia(false);
+    }
+  };
+
   const handleSelectedWallPost = async () => {
-    if (!user || !selectedBeer || selectedWallPosting || !selectedParticipates) return;
+    if (!user || !selectedBeer || selectedWallPosting || selectedWallPickingMedia || !selectedParticipates) return;
     const trimmed = selectedWallPostText.trim();
-    if (!trimmed) {
+    if (!trimmed && !selectedWallMedia) {
       setSelectedWallError('Write a Wall post before publishing.');
       return;
     }
@@ -426,9 +467,17 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
     setSelectedWallError(null);
     setSelectedWallPosted(false);
     try {
-      await createBeerWallPost(user.id, selectedBeer.id, trimmed);
+      const uploadedMedia = selectedWallMedia ? await uploadPostMedia(user.id, selectedWallMedia) : null;
+      await createBeerWallPost(user.id, selectedBeer.id, trimmed, uploadedMedia);
       setSelectedWallPostText('');
+      setSelectedWallMedia(null);
       setSelectedWallPosted(true);
+      onBeerWallPostSuccess?.({
+        id: selectedBeer.id,
+        name: selectedBeer.name,
+        dayNumber: selectedBeer.day_number,
+        brewery: selectedBeer.brewery,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not post to the Wall.';
       setSelectedWallError(message);
@@ -438,9 +487,9 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
   };
 
   const handleTodayWallPost = async () => {
-    if (!user || !todayBeer || todayWallPosting || !todayParticipates) return;
+    if (!user || !todayBeer || todayWallPosting || todayWallPickingMedia || !todayParticipates) return;
     const trimmed = todayWallPostText.trim();
-    if (!trimmed) {
+    if (!trimmed && !todayWallMedia) {
       setTodayWallError('Write a Wall post before publishing.');
       return;
     }
@@ -449,9 +498,17 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
     setTodayWallError(null);
     setTodayWallPosted(false);
     try {
-      await createBeerWallPost(user.id, todayBeer.id, trimmed);
+      const uploadedMedia = todayWallMedia ? await uploadPostMedia(user.id, todayWallMedia) : null;
+      await createBeerWallPost(user.id, todayBeer.id, trimmed, uploadedMedia);
       setTodayWallPostText('');
+      setTodayWallMedia(null);
       setTodayWallPosted(true);
+      onBeerWallPostSuccess?.({
+        id: todayBeer.id,
+        name: todayBeer.name,
+        dayNumber: todayBeer.day_number,
+        brewery: todayBeer.brewery,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not post to the Wall.';
       setTodayWallError(message);
@@ -580,14 +637,65 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
     </View>
   );
 
+  const renderWallMediaPreview = (media: PickedMedia, onRemove: () => void, disabled: boolean) => (
+    <View style={styles.wallPreviewWrap}>
+      {media.mediaType === 'video' ? (
+        <View style={styles.wallPreviewVideo}>
+          <Text style={styles.wallPreviewVideoIcon}>🎥</Text>
+          <Text style={styles.wallPreviewVideoText} numberOfLines={2}>{media.fileName}</Text>
+        </View>
+      ) : (
+        <Image source={{ uri: media.uri }} style={styles.wallPreviewImage} resizeMode="cover" />
+      )}
+      <TouchableOpacity
+        style={[styles.wallPreviewRemove, disabled && styles.wallButtonDisabled]}
+        onPress={onRemove}
+        disabled={disabled}
+        activeOpacity={0.78}
+      >
+        <Text style={styles.wallPreviewRemoveText}>✕</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  const renderWallMediaButtons = (target: 'selected' | 'today', disabled: boolean, picking: boolean) => (
+    <View style={styles.wallMediaButtonRow}>
+      <TouchableOpacity
+        style={[styles.wallMediaButton, disabled && styles.wallButtonDisabled]}
+        onPress={() => void handleBeerWallMediaPick(target, 'photo-library')}
+        disabled={disabled}
+        activeOpacity={0.78}
+      >
+        <Text style={styles.wallMediaButtonText}>{picking ? 'Opening...' : '📎 Photo'}</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.wallMediaButton, disabled && styles.wallButtonDisabled]}
+        onPress={() => void handleBeerWallMediaPick(target, 'camera')}
+        disabled={disabled}
+        activeOpacity={0.78}
+      >
+        <Text style={styles.wallMediaButtonText}>📷 Camera</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.wallMediaButton, disabled && styles.wallButtonDisabled]}
+        onPress={() => void handleBeerWallMediaPick(target, 'video-library')}
+        disabled={disabled}
+        activeOpacity={0.78}
+      >
+        <Text style={styles.wallMediaButtonText}>🎥 Video</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
   const renderSelectedWallPanel = (beer: Beer) => {
-    const canPublish = Boolean(user && selectedWallPostText.trim() && !selectedWallPosting);
+    const mediaBusy = selectedWallPosting || selectedWallPickingMedia;
+    const canPublish = Boolean(user && (selectedWallPostText.trim() || selectedWallMedia) && !mediaBusy);
 
     return (
       <View style={styles.wallHubCard}>
         <Text style={styles.factLabel}>Post to the Wall</Text>
         <Text style={styles.wallHelpText}>
-          Share a beer-tagged post for Day {beer.day_number}. Photo posting remains available from the filtered Wall composer.
+          Share a beer-tagged post for Day {beer.day_number}. Add a Photo, Camera shot, or Video here.
         </Text>
 
         {user ? (
@@ -600,9 +708,11 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
               numberOfLines={3}
               value={selectedWallPostText}
               onChangeText={setSelectedWallPostText}
-              editable={!selectedWallPosting}
+              editable={!mediaBusy}
               textAlignVertical="top"
             />
+            {selectedWallMedia ? renderWallMediaPreview(selectedWallMedia, () => setSelectedWallMedia(null), mediaBusy) : null}
+            {renderWallMediaButtons('selected', mediaBusy, selectedWallPickingMedia)}
             <View style={styles.wallActionRow}>
               <TouchableOpacity
                 style={[styles.wallPrimaryButton, !canPublish && styles.wallButtonDisabled]}
@@ -630,13 +740,14 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
 
   // Renders the inline post-to-Wall composer for today's beer (Your Beer tab)
   const renderTodayWallPanel = (beer: Beer) => {
-    const canPublish = Boolean(user && todayWallPostText.trim() && !todayWallPosting);
+    const mediaBusy = todayWallPosting || todayWallPickingMedia;
+    const canPublish = Boolean(user && (todayWallPostText.trim() || todayWallMedia) && !mediaBusy);
 
     return (
       <View style={styles.wallHubCard}>
         <Text style={styles.factLabel}>Post to the Wall</Text>
         <Text style={styles.wallHelpText}>
-          Share a beer-tagged post for Day {beer.day_number}. Photo posting remains available from the filtered Wall composer.
+          Share a beer-tagged post for Day {beer.day_number}. Add a Photo, Camera shot, or Video here.
         </Text>
 
         {user ? (
@@ -649,9 +760,11 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
               numberOfLines={3}
               value={todayWallPostText}
               onChangeText={setTodayWallPostText}
-              editable={!todayWallPosting}
+              editable={!mediaBusy}
               textAlignVertical="top"
             />
+            {todayWallMedia ? renderWallMediaPreview(todayWallMedia, () => setTodayWallMedia(null), mediaBusy) : null}
+            {renderWallMediaButtons('today', mediaBusy, todayWallPickingMedia)}
             <View style={styles.wallActionRow}>
               <TouchableOpacity
                 style={[styles.wallPrimaryButton, !canPublish && styles.wallButtonDisabled]}
@@ -854,11 +967,6 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
           : beerVisibility.tier === 'oddballs'
             ? renderOddballsInfoBanner('participating')
             : null}
-        {todayBeer.description ? (
-          <Text style={styles.descriptionText}>{todayBeer.description}</Text>
-        ) : (
-          <Text style={styles.missingDataText}>No description field has been added for this beer yet.</Text>
-        )}
         {(todayBeer.beer_fact || todayBeer.brewery_fact) ? (
           <View style={styles.factCard}>
             {todayBeer.beer_fact ? (
@@ -984,12 +1092,11 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
 
     const meta = formatBeerMeta(selectedBeer);
     const isSelectedToday = selectedBeer.day_number === todayDay;
-    // Past day = revealed but not today. Only today's beer gets the inline Wall composer.
-    const isPastDay = !isSelectedToday;
 
     return (
       <Modal visible transparent animationType="fade" onRequestClose={closeBeerDetail} statusBarTranslucent>
         <View style={styles.modalBackdrop}>
+          <Pressable style={styles.modalBackdropPressable} onPress={closeBeerDetail} />
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalDayLabel}>
@@ -1004,7 +1111,7 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
               behavior={Platform.OS === 'ios' ? 'padding' : undefined}
               style={styles.modalKAV}
             >
-              <ScrollView contentContainerStyle={styles.modalScrollContent}>
+              <ScrollView contentContainerStyle={styles.modalScrollContent} keyboardShouldPersistTaps="handled">
               {selectedBeer.image_url ? (
                 <Image source={{ uri: selectedBeer.image_url }} style={styles.detailImage} resizeMode="cover" />
               ) : null}
@@ -1012,13 +1119,6 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
               <Text style={styles.modalBreweryTitle}>{selectedBeer.brewery}</Text>
               {meta ? <Text style={styles.modalMetaText}>{meta}</Text> : null}
               {selectedIsFullSocietyPeek ? renderOddballsInfoBanner('peek') : null}
-              {selectedBeer.description ? (
-                <Text style={styles.modalDescriptionText}>{selectedBeer.description}</Text>
-              ) : (
-                <Text style={styles.missingDataText}>
-                  No description field has been added for this beer yet.
-                </Text>
-              )}
 
               {(selectedBeer.beer_fact || selectedBeer.brewery_fact) ? (
                 <View style={styles.factCard}>
@@ -1061,11 +1161,9 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
                     savingRating: ratingSaving,
                   })
                 : renderReadOnlyParticipationCard('rating')}
-              {!isPastDay
-                ? selectedParticipates
-                  ? renderSelectedWallPanel(selectedBeer)
-                  : renderReadOnlyParticipationCard('wall')
-                : null}
+              {selectedParticipates
+                ? renderSelectedWallPanel(selectedBeer)
+                : renderReadOnlyParticipationCard('wall')}
             </ScrollView>
             </KeyboardAvoidingView>
           </View>
@@ -1081,6 +1179,7 @@ export function NativeBeerScreen({ mode = 'calendar' }: NativeBeerScreenProps) {
         <ScrollView
           ref={scrollViewRef}
           contentContainerStyle={[styles.scrollContent, mode === 'calendar' && styles.calendarScrollContent]}
+          keyboardShouldPersistTaps="handled"
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -1634,6 +1733,7 @@ const styles = StyleSheet.create({
   todayBadge: {
     backgroundColor: COLORS.gold,
     borderRadius: 999,
+    marginRight: 8,
     paddingHorizontal: 9,
     paddingVertical: 5,
   },
@@ -1650,6 +1750,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 18,
   },
+  modalBackdropPressable: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 0,
+  },
   modalCard: {
     backgroundColor: COLORS.card,
     borderColor: COLORS.borderStrong,
@@ -1659,6 +1763,7 @@ const styles = StyleSheet.create({
     maxHeight: '86%',
     overflow: 'hidden',
     width: '100%',
+    zIndex: 1,
   },
   modalKAV: {
     flex: 1,
@@ -1892,6 +1997,71 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     textAlignVertical: 'top',
+  },
+  wallPreviewWrap: {
+    alignSelf: 'flex-start',
+    marginTop: 12,
+    maxWidth: '100%',
+  },
+  wallPreviewImage: {
+    borderRadius: 8,
+    height: 190,
+    width: 260,
+  },
+  wallPreviewVideo: {
+    alignItems: 'center',
+    backgroundColor: '#000',
+    borderColor: COLORS.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    height: 150,
+    justifyContent: 'center',
+    padding: 16,
+    width: 260,
+  },
+  wallPreviewVideoIcon: {
+    fontSize: 32,
+    marginBottom: 8,
+  },
+  wallPreviewVideoText: {
+    ...HHS_TYPOGRAPHY.body,
+    color: COLORS.text,
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  wallPreviewRemove: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    borderRadius: 14,
+    height: 28,
+    justifyContent: 'center',
+    position: 'absolute',
+    right: 7,
+    top: 7,
+    width: 28,
+  },
+  wallPreviewRemoveText: {
+    ...HHS_TYPOGRAPHY.body,
+    color: '#fff',
+    fontSize: 12,
+  },
+  wallMediaButtonRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  wallMediaButton: {
+    borderColor: COLORS.border,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+  },
+  wallMediaButtonText: {
+    ...HHS_TYPOGRAPHY.body,
+    color: COLORS.muted,
+    fontSize: 13,
   },
   wallActionRow: {
     alignItems: 'center',

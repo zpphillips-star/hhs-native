@@ -2,9 +2,10 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Image,
   ImageBackground,
   Linking,
+  Modal,
+  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -22,6 +23,7 @@ import {
   getPushRegistrationSupport,
   isDeviceRegisteredLocally,
   requestNotificationPermission,
+  type PushRegistrationResult,
   registerDeviceForPushNotifications,
   unregisterCachedPushToken,
   type PushPermissionStatus,
@@ -33,7 +35,9 @@ import {
   DEFAULT_NOTIFICATION_PREFERENCES,
   fetchCurrentUserProfile,
   fetchNotificationPreferences,
+  fetchRosterPreference,
   saveNotificationPreferences,
+  saveRosterPreference,
   type HhsProfile,
   type NotificationPreferences,
 } from './accountSettingsService';
@@ -43,6 +47,11 @@ import {
   saveBeerVisibilityPreference,
   type BeerVisibilityPreference,
 } from '../membership/beerVisibilityService';
+import {
+  DEFAULT_RANKINGS_DISPLAY_PREFERENCES,
+  loadRankingsDisplayPreferences,
+  saveRankingsDisplayPreferences,
+} from '../rankings/rankingsPreferences';
 import { HHS_COLORS, HHS_STYLES, HHS_TYPOGRAPHY } from '../../theme/hhsTheme';
 
 const COLORS = HHS_COLORS;
@@ -80,19 +89,35 @@ function getDisplayName(profile: HhsProfile | null, fallbackEmail: string | unde
 
 type PreferenceRowProps = {
   label: string;
-  description: string;
+  description?: string;
+  helpText?: string;
   enabled: boolean;
   indented?: boolean;
   disabled?: boolean;
   onValueChange: (value: boolean) => void;
 };
 
-function PreferenceRow({ label, description, enabled, indented, disabled, onValueChange }: PreferenceRowProps) {
+function PreferenceRow({ label, description, helpText, enabled, indented, disabled, onValueChange }: PreferenceRowProps) {
+  const [helpVisible, setHelpVisible] = useState(false);
+
   return (
     <View style={[styles.preferenceRow, indented && styles.preferenceRowIndented]}>
       <View style={styles.preferenceText}>
-        <Text style={styles.preferenceLabel}>{label}</Text>
-        <Text style={styles.preferenceDescription}>{description}</Text>
+        <View style={styles.preferenceLabelRow}>
+          <Text style={styles.preferenceLabel}>{label}</Text>
+          {helpText ? (
+            <TouchableOpacity
+               accessibilityLabel={`${label} help`}
+               accessibilityRole="button"
+               activeOpacity={0.78}
+               onPress={() => setHelpVisible(true)}
+               style={styles.preferenceHelpButton}
+             >
+               <Text style={styles.preferenceHelpText}>?</Text>
+             </TouchableOpacity>
+           ) : null}
+        </View>
+        {description ? <Text style={styles.preferenceDescription}>{description}</Text> : null}
       </View>
       <Switch
         disabled={disabled}
@@ -102,6 +127,36 @@ function PreferenceRow({ label, description, enabled, indented, disabled, onValu
         trackColor={{ false: COLORS.cardAlt, true: COLORS.goldDark }}
         value={enabled}
       />
+      <Modal
+        visible={helpVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setHelpVisible(false)}
+        statusBarTranslucent
+      >
+        <Pressable style={styles.helpModalBackdrop} onPress={() => setHelpVisible(false)}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setHelpVisible(false)}
+            style={styles.helpModalCard}
+          >
+            <View style={styles.helpModalHeader}>
+              <Text style={styles.helpModalKicker}>Hallowed Hop Society</Text>
+              <TouchableOpacity
+                accessibilityLabel="Close help"
+                accessibilityRole="button"
+                activeOpacity={0.78}
+                onPress={() => setHelpVisible(false)}
+                style={styles.helpModalCloseButton}
+              >
+                <Text style={styles.helpModalCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.helpModalTitle}>{label}</Text>
+            <Text style={styles.helpModalBody}>{helpText}</Text>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -131,8 +186,16 @@ export function NativeAccountSettingsScreen({
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [prefSavingKey, setPrefSavingKey] = useState<keyof NotificationPreferences | null>(null);
   const [prefError, setPrefError] = useState<string | null>(null);
+  const [showFirstNameInRoster, setShowFirstNameInRoster] = useState(true);
+  const [rosterPreferenceSaving, setRosterPreferenceSaving] = useState(false);
+  const [rosterPreferenceError, setRosterPreferenceError] = useState<string | null>(null);
   const [beerVisibilitySaving, setBeerVisibilitySaving] = useState(false);
   const [beerVisibilityError, setBeerVisibilityError] = useState<string | null>(null);
+  const [showMyBeersInRankings, setShowMyBeersInRankings] = useState(
+    DEFAULT_RANKINGS_DISPLAY_PREFERENCES.showMyBeersInRankings,
+  );
+  const [rankingsDisplaySaving, setRankingsDisplaySaving] = useState(false);
+  const [rankingsDisplayError, setRankingsDisplayError] = useState<string | null>(null);
   const [pushStatus, setPushStatus] = useState<PushPermissionStatus>('unknown');
   const [pushMessage, setPushMessage] = useState<string | null>(null);
   const [registeringPush, setRegisteringPush] = useState(false);
@@ -152,6 +215,7 @@ export function NativeAccountSettingsScreen({
   // Mounted guard: prevents async callbacks from calling setState after the
   // component unmounts (e.g. user navigates away while a fetch is in flight).
   const mountedRef = useRef(true);
+  const autoRegistrationAttemptedRef = useRef<string | null>(null);
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -165,15 +229,21 @@ export function NativeAccountSettingsScreen({
       setPrefs(DEFAULT_NOTIFICATION_PREFERENCES);
       setDetailsError(null);
       setPrefError(null);
+      setShowFirstNameInRoster(true);
+      setRosterPreferenceError(null);
       setBeerVisibilityError(null);
+      setShowMyBeersInRankings(DEFAULT_RANKINGS_DISPLAY_PREFERENCES.showMyBeersInRankings);
+      setRankingsDisplayError(null);
       setIsDeviceRegistered(false);
       setPushMessage(null);
       setPushStatus('unknown');
+      autoRegistrationAttemptedRef.current = null;
       setLoadingDetails(false);
       setRefreshing(false);
       return;
     }
 
+    autoRegistrationAttemptedRef.current = null;
     if (showRefresh) {
       setRefreshing(true);
     } else {
@@ -204,6 +274,30 @@ export function NativeAccountSettingsScreen({
     }
 
     try {
+      const rosterPreference = await fetchRosterPreference(user.id);
+      if (!mountedRef.current) return;
+      setShowFirstNameInRoster(rosterPreference.show_real_name_in_roster);
+      setRosterPreferenceError(null);
+    } catch (err) {
+      if (!mountedRef.current) return;
+      const message = err instanceof Error ? err.message : 'Could not load roster preference.';
+      setShowFirstNameInRoster(true);
+      setRosterPreferenceError(message);
+    }
+
+    try {
+      const rankingsPrefs = await loadRankingsDisplayPreferences(user.id);
+      if (!mountedRef.current) return;
+      setShowMyBeersInRankings(rankingsPrefs.showMyBeersInRankings);
+      setRankingsDisplayError(null);
+    } catch (err) {
+      if (!mountedRef.current) return;
+      const message = err instanceof Error ? err.message : 'Could not load Rankings display preference.';
+      setShowMyBeersInRankings(DEFAULT_RANKINGS_DISPLAY_PREFERENCES.showMyBeersInRankings);
+      setRankingsDisplayError(message);
+    }
+
+    try {
       const nextPushStatus = await getCurrentPushPermissionStatus();
       if (!mountedRef.current) return;
       setPushStatus(nextPushStatus);
@@ -223,9 +317,65 @@ export function NativeAccountSettingsScreen({
     }
   }, [user?.id]);
 
+  const applyPushRegistrationResult = useCallback(
+    (result: PushRegistrationResult, options?: { showSuccessMessage?: boolean; surfacePendingMessage?: boolean }) => {
+      const showSuccessMessage = options?.showSuccessMessage ?? false;
+      const surfacePendingMessage = options?.surfacePendingMessage ?? false;
+
+      setPushStatus(result.status);
+      setIsDeviceRegistered(Boolean(result.ok && result.registered));
+
+      if (result.ok && result.registered) {
+        setPushMessage(showSuccessMessage ? 'This phone is ready for HHS social notifications.' : null);
+        return;
+      }
+
+      if (result.status === 'denied' || result.status === 'undetermined') {
+        setPushMessage(surfacePendingMessage ? result.message : null);
+        return;
+      }
+
+      setPushMessage(result.message);
+    },
+    [],
+  );
+
+  const runAutomaticPushRegistration = useCallback(
+    async (options?: { showSuccessMessage?: boolean; surfacePendingMessage?: boolean }) => {
+      if (!user?.id) return null;
+
+      setRegisteringPush(true);
+      try {
+        const result = await registerDeviceForPushNotifications(
+          { id: user.id, email: profile?.email ?? user.email },
+          { requestPermission: false },
+        );
+        if (mountedRef.current) {
+          applyPushRegistrationResult(result, options);
+        }
+        return result;
+      } finally {
+        if (mountedRef.current) {
+          setRegisteringPush(false);
+        }
+      }
+    },
+    [applyPushRegistrationResult, profile?.email, user?.email, user?.id],
+  );
+
   useEffect(() => {
     void loadAccountDetails();
   }, [loadAccountDetails]);
+
+  useEffect(() => {
+    if (!user?.id || pushStatus !== 'granted' || isDeviceRegistered || !pushRegistrationSupport.canRegister) return;
+
+    const attemptKey = `${user.id}:${pushStatus}:${isDeviceRegistered}`;
+    if (autoRegistrationAttemptedRef.current === attemptKey) return;
+    autoRegistrationAttemptedRef.current = attemptKey;
+
+    void runAutomaticPushRegistration();
+  }, [isDeviceRegistered, pushRegistrationSupport.canRegister, pushStatus, runAutomaticPushRegistration, user?.id]);
 
   useEffect(() => {
     if (mode !== 'about') return undefined;
@@ -250,22 +400,15 @@ export function NativeAccountSettingsScreen({
   const handleRegisterPush = useCallback(async () => {
     if (!user?.id || registeringPush) return;
 
-    setRegisteringPush(true);
-    setPushMessage(null);
-
-    const result = await registerDeviceForPushNotifications(
-      { id: user.id, email: profile?.email ?? user.email },
-      { requestPermission: true },
-    );
-
-    setPushStatus(result.status);
-    setPushMessage(result.message);
-    // Update registration state so social notification toggles show as active.
-    if (result.ok && result.registered) {
-      setIsDeviceRegistered(true);
+    if (pushStatus !== 'granted') {
+      const permission = await requestNotificationPermission();
+      setPushStatus(permission.status);
+      setPushMessage(permission.message);
+      if (!permission.ok) return;
     }
-    setRegisteringPush(false);
-  }, [profile?.email, registeringPush, user?.email, user?.id]);
+
+    await runAutomaticPushRegistration({ showSuccessMessage: true, surfacePendingMessage: true });
+  }, [pushStatus, registeringPush, runAutomaticPushRegistration, user?.id]);
 
   const handlePreferenceChange = useCallback(
     async (key: keyof NotificationPreferences, value: boolean) => {
@@ -285,6 +428,8 @@ export function NativeAccountSettingsScreen({
           if (!permission.ok) {
             throw new Error(permission.message);
           }
+
+          void runAutomaticPushRegistration();
         }
 
         setPrefs(nextPrefs);
@@ -301,7 +446,7 @@ export function NativeAccountSettingsScreen({
         setPrefSavingKey(null);
       }
     },
-    [prefSavingKey, prefs, profile?.email, user?.email, user?.id],
+    [prefSavingKey, prefs, profile?.email, runAutomaticPushRegistration, user?.email, user?.id],
   );
 
   const handleBeerVisibilityChange = useCallback(
@@ -332,6 +477,53 @@ export function NativeAccountSettingsScreen({
       }
     },
     [beerVisibilitySaving, normalizedTier, profile, user?.id],
+  );
+
+  const handleRosterPreferenceChange = useCallback(
+    async (showFirstName: boolean) => {
+      if (!user?.id || rosterPreferenceSaving) return;
+
+      const previousValue = showFirstNameInRoster;
+      setShowFirstNameInRoster(showFirstName);
+      setRosterPreferenceSaving(true);
+      setRosterPreferenceError(null);
+
+      try {
+        const saved = await saveRosterPreference(user.id, showFirstName);
+        setShowFirstNameInRoster(saved.show_real_name_in_roster);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Could not save roster preference.';
+        setShowFirstNameInRoster(previousValue);
+        setRosterPreferenceError(message);
+      } finally {
+        setRosterPreferenceSaving(false);
+      }
+    },
+    [rosterPreferenceSaving, showFirstNameInRoster, user?.id],
+  );
+
+  const handleRankingsDisplayPreferenceChange = useCallback(
+    async (showMyBeers: boolean) => {
+      if (!user?.id || rankingsDisplaySaving) return;
+
+      const previousValue = showMyBeersInRankings;
+      setShowMyBeersInRankings(showMyBeers);
+      setRankingsDisplaySaving(true);
+      setRankingsDisplayError(null);
+
+      try {
+        await saveRankingsDisplayPreferences(user.id, {
+          showMyBeersInRankings: showMyBeers,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Could not save Rankings display preference.';
+        setShowMyBeersInRankings(previousValue);
+        setRankingsDisplayError(message);
+      } finally {
+        setRankingsDisplaySaving(false);
+      }
+    },
+    [rankingsDisplaySaving, showMyBeersInRankings, user?.id],
   );
 
   const handleSignIn = async () => {
@@ -371,6 +563,10 @@ export function NativeAccountSettingsScreen({
     setIsDeviceRegistered(false);
     setPushMessage(null);
     setPushStatus('unknown');
+    setShowFirstNameInRoster(true);
+    setRosterPreferenceError(null);
+    setShowMyBeersInRankings(DEFAULT_RANKINGS_DISPLAY_PREFERENCES.showMyBeersInRankings);
+    setRankingsDisplayError(null);
   };
 
   const handleSubmitFeedback = async () => {
@@ -658,65 +854,47 @@ export function NativeAccountSettingsScreen({
     );
   };
 
-  const renderBeerVisibilitySettings = () => {
-    if (!user || !profile) return null;
+  const renderAppFeatureVisibilitySettings = () => {
+    if (!user) return null;
 
-    const effectivePreference = getEffectiveBeerVisibilityPreference(
-      normalizedTier,
-      profile.beer_visibility_preference ?? null,
-    );
+    const effectivePreference = profile
+      ? getEffectiveBeerVisibilityPreference(normalizedTier, profile.beer_visibility_preference ?? null)
+      : 'all';
     const showingHallowedCalendar = effectivePreference === 'all';
-
-    if (normalizedTier === 'unknown') {
-      return (
-        <View style={styles.card}>
-          <Text style={styles.sectionKicker}>Membership</Text>
-          <Text style={styles.cardTitle}>Beer Calendar Visibility</Text>
-          <Text style={styles.bodyText}>
-            This setting controls whether you see only the beers for your membership tier or the full 31-beer
-            lineup.{'\n\n'}
-            Oddballs members (16 beers, odd-numbered days) can turn on &quot;Show all 31 beers&quot; to peek at
-            revealed Full Society beers — even-day entries stay read-only.{'\n\n'}
-            Your membership tier is not yet set in your profile. Contact HHS or check your membership
-            confirmation to get your tier configured.
-          </Text>
-        </View>
-      );
-    }
+    const beerVisibilityDisabled =
+      beerVisibilitySaving || !profile || normalizedTier === 'unknown' || normalizedTier === 'logged_out';
 
     return (
       <View style={styles.card}>
         <Text style={styles.sectionKicker}>Membership</Text>
-        <Text style={styles.cardTitle}>Beer Calendar Visibility</Text>
-        <Text style={styles.bodyText}>
-          Your membership: {formatTier(profile?.tier)}.{'\n\n'}
-          Choose which beer calendar list you want to see. Hallowed shows all 31 beers; Oddballs shows the
-          16 odd-numbered beer days.
-          {normalizedTier !== 'oddballs'
-            ? ' This changes calendar visibility only; your actual membership stays unchanged.'
-            : ''}
-        </Text>
+        <Text style={styles.cardTitle}>App Feature Visibility</Text>
         {beerVisibilityError ? <Text style={styles.errorText}>{beerVisibilityError}</Text> : null}
+        {rankingsDisplayError ? <Text style={styles.errorText}>{rankingsDisplayError}</Text> : null}
+        {rosterPreferenceError ? <Text style={styles.errorText}>{rosterPreferenceError}</Text> : null}
         <PreferenceRow
-          disabled={beerVisibilitySaving}
+          disabled={beerVisibilityDisabled}
           enabled={showingHallowedCalendar}
-          label={normalizedTier === 'oddballs' ? 'Show all beers' : 'Show all 31 beers'}
-          description={
-            showingHallowedCalendar
-              ? 'Showing the full 31-beer calendar.'
-              : normalizedTier === 'oddballs'
-                ? 'Showing your 16 odd-day beers only.'
-                : 'Showing the Oddballs 16-beer calendar.'
-          }
+          label="Beer Calendar Visibility"
+          helpText="Only applicable for Oddball members: choose whether the Calendar shows only your 16 odd-day beers or the full 31-beer lineup. Hallowed members always see all 31 beers."
           onValueChange={(value) => void handleBeerVisibilityChange(value)}
         />
-        {normalizedTier === 'oddballs' ? (
-          <Text style={styles.helperText}>
-            You can view all Hallowed beers, but Oddball members can only rate and post about beers
-            included in their membership.
-          </Text>
-        ) : null}
+        <PreferenceRow
+          disabled={rankingsDisplaySaving}
+          enabled={showMyBeersInRankings}
+          label="Rankings Display"
+          helpText="Choose whether The Rankings includes your personal My Beers ratings section between Top Beers and Members."
+          onValueChange={(value) => void handleRankingsDisplayPreferenceChange(value)}
+        />
+        <PreferenceRow
+          disabled={rosterPreferenceSaving}
+          enabled={showFirstNameInRoster}
+          label="Member Name Visibility"
+          helpText="Choose whether other approved members can see your first name next to your username in the HHS Roster. Emails and last names are never shown."
+          onValueChange={(value) => void handleRosterPreferenceChange(value)}
+        />
         {beerVisibilitySaving ? <Text style={styles.settingsSavingText}>Saving beer visibility…</Text> : null}
+        {rankingsDisplaySaving ? <Text style={styles.settingsSavingText}>Saving Rankings preference…</Text> : null}
+        {rosterPreferenceSaving ? <Text style={styles.settingsSavingText}>Saving roster preference…</Text> : null}
       </View>
     );
   };
@@ -746,11 +924,6 @@ export function NativeAccountSettingsScreen({
         <View style={styles.aboutHeroSection}>
           <Text style={styles.aboutHeroKicker}>The Annual October Ritual</Text>
           <Text style={styles.aboutDisplayTitle}>HALLOWED{'\n'}HOP SOCIETY</Text>
-          <Image
-            resizeMode="contain"
-            source={require('../../../assets/mughhs.webp')}
-            style={styles.aboutHeroImage}
-          />
         </View>
 
         <View style={styles.aboutDivider} />
@@ -839,7 +1012,7 @@ export function NativeAccountSettingsScreen({
       {user ? (
         <>
           {renderAccountSummary()}
-          {renderBeerVisibilitySettings()}
+          {renderAppFeatureVisibilitySettings()}
           {renderNotificationSettings()}
         </>
       ) : (
@@ -1260,17 +1433,98 @@ const styles = StyleSheet.create({
   preferenceText: {
     flex: 1,
   },
+  preferenceLabelRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 7,
+  },
   preferenceLabel: {
     ...HHS_TYPOGRAPHY.display,
     color: COLORS.text,
     fontSize: 15,
-    marginBottom: 4,
+  },
+  preferenceHelpButton: {
+    alignItems: 'center',
+    borderColor: COLORS.borderStrong,
+    borderRadius: 10,
+    borderWidth: 1,
+    height: 20,
+    justifyContent: 'center',
+    width: 20,
+  },
+  preferenceHelpText: {
+    ...HHS_TYPOGRAPHY.button,
+    color: COLORS.gold,
+    fontSize: 12,
+    lineHeight: 15,
   },
   preferenceDescription: {
     ...HHS_TYPOGRAPHY.body,
     color: COLORS.muted,
     fontSize: 13,
     lineHeight: 18,
+    marginTop: 4,
+  },
+  helpModalBackdrop: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(8, 7, 13, 0.78)',
+    flex: 1,
+    justifyContent: 'center',
+    padding: 24,
+  },
+  helpModalCard: {
+    backgroundColor: COLORS.card,
+    borderColor: COLORS.borderStrong,
+    borderRadius: HHS_STYLES.cardRadius,
+    borderWidth: 1,
+    maxWidth: 420,
+    padding: 18,
+    shadowColor: COLORS.gold,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 24,
+    width: '100%',
+  },
+  helpModalHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  helpModalKicker: {
+    ...HHS_TYPOGRAPHY.kicker,
+    color: COLORS.gold,
+    fontSize: 10,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+  },
+  helpModalCloseButton: {
+    alignItems: 'center',
+    borderColor: COLORS.border,
+    borderRadius: 999,
+    borderWidth: 1,
+    height: 30,
+    justifyContent: 'center',
+    width: 30,
+  },
+  helpModalCloseText: {
+    ...HHS_TYPOGRAPHY.button,
+    color: COLORS.gold,
+    fontSize: 13,
+    lineHeight: 16,
+  },
+  helpModalTitle: {
+    ...HHS_TYPOGRAPHY.display,
+    color: COLORS.text,
+    fontSize: 22,
+    marginBottom: 8,
+  },
+  helpModalBody: {
+    ...HHS_TYPOGRAPHY.body,
+    color: COLORS.muted,
+    fontSize: 15,
+    lineHeight: 22,
   },
   settingsSavingText: {
     ...HHS_TYPOGRAPHY.body,
@@ -1296,12 +1550,6 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
 
-  aboutHeroImage: {
-    height: 170,
-    marginTop: 14,
-    opacity: 0.82,
-    width: '72%',
-  },
 
   aboutDisplayTitle: {
     ...HHS_TYPOGRAPHY.display,

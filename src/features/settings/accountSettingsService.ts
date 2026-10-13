@@ -32,6 +32,10 @@ export type NotificationPreferences = {
   social_comment_on_your_items: boolean;
 };
 
+export type RosterPreference = {
+  show_real_name_in_roster: boolean;
+};
+
 export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
   daily_beer: true,
   social_all: true,
@@ -197,6 +201,62 @@ export async function fetchNotificationPreferences(userId: string): Promise<Noti
   } finally {
     clearTimeout(timer);
   }
+}
+
+export async function fetchRosterPreference(userId: string): Promise<RosterPreference> {
+  const authHeaders = await getAuthenticatedApiHeaders(userId);
+  const response = await fetch(
+    `${HHS_WEB_ORIGIN}/api/roster-preference?user_id=${encodeURIComponent(userId)}`,
+    {
+      headers: authHeaders,
+    },
+  );
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Could not load roster preference (${response.status}).`);
+  }
+
+  const json = (await response.json()) as { ok?: boolean; show_real_name_in_roster?: boolean; error?: string };
+  if (!json.ok) {
+    throw new Error(json.error || 'Could not load roster preference.');
+  }
+
+  return {
+    show_real_name_in_roster: json.show_real_name_in_roster !== false,
+  };
+}
+
+export async function saveRosterPreference(
+  userId: string,
+  showRealNameInRoster: boolean,
+): Promise<RosterPreference> {
+  const authHeaders = await getAuthenticatedApiHeaders(userId);
+  const response = await fetch(`${HHS_WEB_ORIGIN}/api/roster-preference`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders,
+    },
+    body: JSON.stringify({
+      user_id: userId,
+      show_real_name_in_roster: showRealNameInRoster,
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Could not save roster preference (${response.status}).`);
+  }
+
+  const json = (await response.json()) as { ok?: boolean; show_real_name_in_roster?: boolean; error?: string };
+  if (!json.ok) {
+    throw new Error(json.error || 'Could not save roster preference.');
+  }
+
+  return {
+    show_real_name_in_roster: json.show_real_name_in_roster !== false,
+  };
 }
 
 export async function saveNotificationPreferences(

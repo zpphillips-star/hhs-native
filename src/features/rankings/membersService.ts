@@ -16,6 +16,7 @@
  */
 
 import { supabase } from '../../lib/supabase';
+import { isVisibleMemberRanking } from '../../lib/memberVisibility';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -238,7 +239,9 @@ export async function fetchRankedMembers(): Promise<RankedMember[]> {
 
   // ── Build ranked list ──────────────────────────────────────────────────────
 
-  const userIds = Object.keys(scores).filter((uid) => scores[uid].score > 0);
+  const userIds = Object.keys(scores).filter(
+    (uid) => scores[uid].score > 0 && isVisibleMemberRanking(profileMap[uid]),
+  );
 
   userIds.sort((a, b) => {
     const diff = scores[b].score - scores[a].score;

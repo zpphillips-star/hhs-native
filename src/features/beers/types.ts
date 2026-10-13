@@ -21,6 +21,11 @@ export type BeerRating = {
   created_at: string;
 };
 
+export type UserBeerRatingListItem = {
+  beer: Beer;
+  rating: BeerRating | null;
+};
+
 export type BeerRatingSummary = {
   average: number | null;
   count: number;

@@ -1,13 +1,21 @@
 import React, { useEffect, useState } from 'react';
-import { BackHandler, Image, Modal, Platform, StyleSheet, Text, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { ActivityIndicator, BackHandler, Image, Linking, Modal, Platform, StyleSheet, Text, TouchableOpacity, TouchableWithoutFeedback, View } from 'react-native';
 import { ModernAntiqua_400Regular, useFonts } from '@expo-google-fonts/modern-antiqua';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { HHS_WEB_ORIGIN, USE_NATIVE_BEER_SCREEN } from '../config/env';
 import { AuthProvider } from '../features/auth/AuthProvider';
+import { useAuth } from '../features/auth/AuthProvider';
 import { NativeBeerScreen } from '../features/beers/NativeBeerScreen';
 import { NativeFeedbackScreen } from '../features/feedback/NativeFeedbackScreen';
+import {
+  getCurrentPushPermissionStatus,
+  isDeviceRegisteredLocally,
+  registerDeviceForPushNotifications,
+} from '../features/notifications/pushRegistrationService';
 import { NativeRankingsScreen } from '../features/rankings/NativeRankingsScreen';
+import { NativeRosterScreen } from '../features/roster/NativeRosterScreen';
 import { NativeAccountSettingsScreen } from '../features/settings/NativeAccountSettingsScreen';
 import { NativeWallBeerContext, NativeWallScreen } from '../features/wall/NativeWallScreen';
 import { syncDailyBeerReminderOnStartup } from '../features/notifications/dailyBeerReminderService';
@@ -16,7 +24,7 @@ import { configureHhsNativeTypography, HHS_COLORS, HHS_STYLES, HHS_TYPOGRAPHY } 
 configureHhsNativeTypography();
 
 type NativeTabId = 'calendar' | 'wall' | 'yourBeer' | 'rankings' | 'settings';
-type NativeContentMode = NativeTabId | 'auth' | 'settingsPage' | 'aboutHhs' | 'feedback';
+type NativeContentMode = NativeTabId | 'auth' | 'settingsPage' | 'roster' | 'aboutHhs' | 'feedback';
 
 type NativeTab = {
   id: NativeTabId;
@@ -34,6 +42,12 @@ const NATIVE_TABS: readonly NativeTab[] = [
 ] as const;
 
 const HHS_LOGO = require('../../assets/icon.png');
+const NOTIFICATION_ONBOARDING_STORAGE_PREFIX = '@hhs:notification-onboarding:v1';
+const HHS_INSTAGRAM_URL = 'https://www.instagram.com/HallowedHopSociety_Official/';
+
+function pause(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 type NativeAppShellProps = {
   fallback: (initialPath?: string) => React.ReactNode;
@@ -59,13 +73,230 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
   const [contentMode, setContentMode] = useState<NativeContentMode>('yourBeer');
   const [settingsMenuVisible, setSettingsMenuVisible] = useState(false);
   const [wallBeerContext, setWallBeerContext] = useState<NativeWallBeerContext | null>(null);
+  const [notificationOnboardingVisible, setNotificationOnboardingVisible] = useState(false);
+  const [notificationOnboardingBusy, setNotificationOnboardingBusy] = useState(false);
+  const [notificationOnboardingMessage, setNotificationOnboardingMessage] = useState<string | null>(null);
+  const [notificationOnboardingCanContinue, setNotificationOnboardingCanContinue] = useState(false);
   const insets = useSafeAreaInsets();
+  const { loading: authLoading, user } = useAuth();
+  const attemptedAutoRegisterRef = React.useRef<string | null>(null);
+  const checkedNotificationOnboardingRef = React.useRef<string | null>(null);
+
+  const signedInUserKey = user?.id ? `${user.id}:${user.email ?? ''}` : null;
 
   // Startup sync: re-schedule daily beer reminder if it was cleared (e.g. by an app update)
   // without ever prompting for permission.
   useEffect(() => {
     void syncDailyBeerReminderOnStartup();
   }, []);
+
+  useEffect(() => {
+    if (!user?.id) {
+      attemptedAutoRegisterRef.current = null;
+      return;
+    }
+
+    const userKey = `${user.id}:${user.email ?? ''}`;
+    if (attemptedAutoRegisterRef.current === userKey) return;
+    attemptedAutoRegisterRef.current = userKey;
+
+    registerDeviceForPushNotifications(
+      { id: user.id, email: user.email },
+      { requestPermission: false },
+    ).then((result) => {
+      if (!result.ok && result.status !== 'denied' && result.status !== 'undetermined') {
+        console.warn('[HHS native] automatic push registration skipped:', result.message);
+      }
+    }).catch((error: unknown) => {
+      console.warn('[HHS native] automatic push registration failed:', error instanceof Error ? error.message : error);
+    });
+  }, [user?.email, user?.id]);
+
+  useEffect(() => {
+    if (authLoading) return;
+
+    if (!user?.id) {
+      checkedNotificationOnboardingRef.current = null;
+      setNotificationOnboardingVisible(false);
+      setNotificationOnboardingBusy(false);
+      setNotificationOnboardingCanContinue(false);
+      setNotificationOnboardingMessage(null);
+      setSettingsMenuVisible(false);
+      setSelectedTab('settings');
+      setContentMode('auth');
+      return;
+    }
+
+    const userKey = `${user.id}:${user.email ?? ''}`;
+    if (checkedNotificationOnboardingRef.current === userKey) return;
+    checkedNotificationOnboardingRef.current = userKey;
+
+    let cancelled = false;
+    const onboardingStorageKey = `${NOTIFICATION_ONBOARDING_STORAGE_PREFIX}:${user.id}`;
+
+    const sendMemberToApp = () => {
+      setSettingsMenuVisible(false);
+      setSelectedTab('yourBeer');
+      setContentMode('yourBeer');
+    };
+
+    const showNotificationOnboarding = (message?: string | null) => {
+      setNotificationOnboardingMessage(message ?? null);
+      setNotificationOnboardingCanContinue(false);
+      setNotificationOnboardingVisible(true);
+      sendMemberToApp();
+    };
+
+    const checkNotificationOnboarding = async () => {
+      try {
+        const [completedState, permissionStatus, registeredLocally] = await Promise.all([
+          AsyncStorage.getItem(onboardingStorageKey).catch(() => null),
+          getCurrentPushPermissionStatus(),
+          isDeviceRegisteredLocally({ id: user.id, email: user.email }),
+        ]);
+
+        if (cancelled) return;
+
+        if (permissionStatus === 'granted' && registeredLocally) {
+          await AsyncStorage.setItem(onboardingStorageKey, 'registered').catch(() => {});
+          if (!cancelled) {
+            setNotificationOnboardingVisible(false);
+            sendMemberToApp();
+          }
+          return;
+        }
+
+        if ((completedState === 'denied' || completedState === 'skipped') && permissionStatus !== 'granted') {
+          setNotificationOnboardingVisible(false);
+          sendMemberToApp();
+          return;
+        }
+
+        if (permissionStatus === 'granted') {
+          setNotificationOnboardingBusy(true);
+          const result = await registerDeviceForPushNotifications(
+            { id: user.id, email: user.email },
+            { requestPermission: false },
+          );
+          if (cancelled) return;
+          setNotificationOnboardingBusy(false);
+
+          if (result.ok && result.registered) {
+            const stillConfirmed = await isDeviceRegisteredLocally({ id: user.id, email: user.email });
+            if (cancelled) return;
+            if (stillConfirmed) {
+              await AsyncStorage.setItem(onboardingStorageKey, 'registered').catch(() => {});
+              setNotificationOnboardingVisible(false);
+              sendMemberToApp();
+              return;
+            }
+          }
+
+          showNotificationOnboarding(result.message);
+          return;
+        }
+
+        showNotificationOnboarding();
+      } catch (error) {
+        if (cancelled) return;
+        const message = error instanceof Error ? error.message : 'Notification setup could not be checked.';
+        showNotificationOnboarding(`${message} You can keep using HHS and retry from Settings.`);
+      } finally {
+        if (!cancelled) setNotificationOnboardingBusy(false);
+      }
+    };
+
+    void checkNotificationOnboarding();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, signedInUserKey, user?.email, user?.id]);
+
+  const handleEnableNotificationsFromOnboarding = React.useCallback(async () => {
+    if (!user?.id || notificationOnboardingBusy) return;
+
+    setNotificationOnboardingBusy(true);
+    setNotificationOnboardingMessage(null);
+    setNotificationOnboardingCanContinue(false);
+
+    const onboardingStorageKey = `${NOTIFICATION_ONBOARDING_STORAGE_PREFIX}:${user.id}`;
+    try {
+      const result = await registerDeviceForPushNotifications(
+        { id: user.id, email: user.email },
+        { requestPermission: true },
+      );
+
+      if (result.ok && result.registered) {
+        const [permissionStatus, registeredLocally] = await Promise.all([
+          getCurrentPushPermissionStatus(),
+          isDeviceRegisteredLocally({ id: user.id, email: user.email }),
+        ]);
+
+        if (permissionStatus === 'granted' && registeredLocally) {
+          await AsyncStorage.setItem(onboardingStorageKey, 'registered').catch(() => {});
+          setNotificationOnboardingMessage('You’re all set — HHS notifications are ready on this phone.');
+          setNotificationOnboardingCanContinue(false);
+          await pause(900);
+          setNotificationOnboardingVisible(false);
+          setSelectedTab('yourBeer');
+          setContentMode('yourBeer');
+          return;
+        }
+
+        setNotificationOnboardingMessage(
+          'Notifications are allowed, but HHS could not confirm this phone yet. Please try again, or continue and retry later from Membership and Notifications.',
+        );
+        setNotificationOnboardingCanContinue(true);
+        return;
+      }
+
+      if (result.status === 'denied') {
+        await AsyncStorage.setItem(onboardingStorageKey, 'denied').catch(() => {});
+        setNotificationOnboardingMessage(
+          'Notifications are blocked in system settings. You can continue now and turn them on later from Membership and Notifications.',
+        );
+        setNotificationOnboardingCanContinue(true);
+        return;
+      }
+
+      if (result.status === 'undetermined') {
+        await AsyncStorage.setItem(onboardingStorageKey, 'skipped').catch(() => {});
+        setNotificationOnboardingMessage(
+          'No problem — you can keep using HHS and turn notifications on later from Membership and Notifications.',
+        );
+        setNotificationOnboardingCanContinue(true);
+        return;
+      }
+
+      setNotificationOnboardingMessage(
+        `${result.message} You can continue now and retry later from Membership and Notifications.`,
+      );
+      setNotificationOnboardingCanContinue(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Notification setup could not be completed.';
+      setNotificationOnboardingMessage(`${message} You can continue now and retry later from Membership and Notifications.`);
+      setNotificationOnboardingCanContinue(true);
+    } finally {
+      setNotificationOnboardingBusy(false);
+    }
+  }, [notificationOnboardingBusy, user?.email, user?.id]);
+
+  const handleContinueWithoutNotifications = React.useCallback(async () => {
+    if (!user?.id || notificationOnboardingBusy) return;
+
+    const permissionStatus = await getCurrentPushPermissionStatus();
+    const onboardingStorageKey = `${NOTIFICATION_ONBOARDING_STORAGE_PREFIX}:${user.id}`;
+    await AsyncStorage.setItem(
+      onboardingStorageKey,
+      permissionStatus === 'denied' ? 'denied' : 'skipped',
+    ).catch(() => {});
+    setNotificationOnboardingVisible(false);
+    setNotificationOnboardingCanContinue(false);
+    setNotificationOnboardingMessage(null);
+    setSelectedTab('yourBeer');
+    setContentMode('yourBeer');
+  }, [notificationOnboardingBusy, user?.id]);
 
   const selectedRoute = NATIVE_TABS.find((tab) => tab.id === selectedTab) ?? NATIVE_TABS[0];
   const activeWebPath = selectedRoute.webPath;
@@ -80,12 +311,21 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
     if (Platform.OS !== 'android') return undefined;
 
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (notificationOnboardingVisible) {
+        if (!notificationOnboardingBusy) void handleContinueWithoutNotifications();
+        return true;
+      }
+
       if (settingsMenuVisible) {
         setSettingsMenuVisible(false);
         return true;
       }
 
-      if (contentMode === 'auth' || contentMode === 'settingsPage' || contentMode === 'aboutHhs' || contentMode === 'feedback') {
+      if (!user && contentMode === 'auth') {
+        return true;
+      }
+
+      if (contentMode === 'auth' || contentMode === 'settingsPage' || contentMode === 'roster' || contentMode === 'aboutHhs' || contentMode === 'feedback') {
         returnToYourBeer();
         return true;
       }
@@ -94,9 +334,23 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
     });
 
     return () => subscription.remove();
-  }, [contentMode, settingsMenuVisible]);
+  }, [
+    contentMode,
+    handleContinueWithoutNotifications,
+    notificationOnboardingBusy,
+    notificationOnboardingVisible,
+    settingsMenuVisible,
+    user,
+  ]);
 
   const handleSelectTab = (tab: NativeTab) => {
+    if (!user) {
+      setSettingsMenuVisible(false);
+      setSelectedTab('settings');
+      setContentMode('auth');
+      return;
+    }
+
     if (tab.id === 'settings') {
       setSettingsMenuVisible(true);
       return;
@@ -105,13 +359,6 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
     setSelectedTab(tab.id);
     setContentMode(tab.id);
     if (tab.id !== 'wall') setWallBeerContext(null);
-  };
-
-  const openWallForBeer = (beer: NativeWallBeerContext) => {
-    setSettingsMenuVisible(false);
-    setWallBeerContext(beer);
-    setSelectedTab('wall');
-    setContentMode('wall');
   };
 
   const openSettingsInfo = () => {
@@ -132,28 +379,50 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
     setContentMode('aboutHhs');
   };
 
+  const openRoster = () => {
+    setSettingsMenuVisible(false);
+    setSelectedTab('settings');
+    setContentMode('roster');
+  };
+
   const openFeedback = () => {
     setSettingsMenuVisible(false);
     setSelectedTab('settings');
     setContentMode('feedback');
   };
 
+  const openWallAfterBeerPost = (beerContext: NativeWallBeerContext) => {
+    setSettingsMenuVisible(false);
+    setWallBeerContext(beerContext);
+    setSelectedTab('wall');
+    setContentMode('wall');
+  };
+
+  const openInstagram = () => {
+    setSettingsMenuVisible(false);
+    void Linking.openURL(HHS_INSTAGRAM_URL);
+  };
+
   return (
     <>
       <View style={styles.shell}>
         <View style={styles.content} key={`${contentMode}:${activeWebPath ?? 'native'}`}>
-          {!fontsLoaded ? (
+          {!fontsLoaded || authLoading ? (
             <View style={styles.fontLoadingScreen} />
+          ) : !user ? (
+            <NativeAccountSettingsScreen mode="auth" onBack={undefined} onOpenAuth={openAuth} />
           ) : contentMode === 'calendar' ? (
-            <NativeBeerScreen mode="calendar" onOpenWallForBeer={openWallForBeer} />
+            <NativeBeerScreen mode="calendar" onBeerWallPostSuccess={openWallAfterBeerPost} />
           ) : contentMode === 'yourBeer' ? (
-            <NativeBeerScreen mode="yourBeer" onOpenWallForBeer={openWallForBeer} />
+            <NativeBeerScreen mode="yourBeer" onBeerWallPostSuccess={openWallAfterBeerPost} />
           ) : contentMode === 'wall' ? (
             <NativeWallScreen initialBeerContext={wallBeerContext} />
           ) : contentMode === 'rankings' ? (
             <NativeRankingsScreen onOpenAuth={openAuth} />
           ) : contentMode === 'auth' ? (
-            <NativeAccountSettingsScreen mode="auth" onBack={returnToYourBeer} onOpenAuth={openAuth} />
+            <NativeAccountSettingsScreen mode="auth" onBack={user ? returnToYourBeer : undefined} onOpenAuth={openAuth} />
+          ) : contentMode === 'roster' ? (
+            <NativeRosterScreen onBack={returnToYourBeer} />
           ) : contentMode === 'aboutHhs' ? (
             <NativeAccountSettingsScreen mode="about" onBack={returnToYourBeer} onOpenAuth={openAuth} />
           ) : contentMode === 'feedback' ? (
@@ -164,33 +433,39 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
             fallback(activeWebPath)
           )}
         </View>
-        <View style={[styles.tabBar, { paddingBottom: Math.max(9, insets.bottom + 4) }]}>
-          {NATIVE_TABS.map((tab) => {
-            const active = tab.id === selectedTab;
-            return (
-              <TouchableOpacity
-                key={tab.id}
-                style={[styles.tabButton, tab.center && styles.centerTabButton, active && styles.tabButtonActive]}
-                onPress={() => handleSelectTab(tab)}
-                activeOpacity={0.8}
-                accessibilityRole="tab"
-                accessibilityLabel={tab.center ? 'Your Beer' : tab.label.replace('\n', ' ')}
-                accessibilityState={{ selected: active }}
-              >
-                {tab.center ? (
-                  <View style={[styles.logoCircle, active && styles.logoCircleActive]}>
-                    <Image source={HHS_LOGO} style={styles.logoImage} resizeMode="contain" />
-                  </View>
-                ) : null}
-                {tab.label ? (
-                  <Text style={[styles.tabText, tab.center && styles.centerTabText, active && styles.tabTextActive]}>
-                    {tab.label}
-                  </Text>
-                ) : null}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+        {user ? (
+          <View style={[styles.tabBar, { paddingBottom: Math.max(9, insets.bottom + 4) }]}>
+            {NATIVE_TABS.map((tab) => {
+              const active = tab.id === selectedTab;
+              return (
+                <TouchableOpacity
+                  key={tab.id}
+                  style={[styles.tabButton, tab.center && styles.centerTabButton, active && styles.tabButtonActive]}
+                  onPress={() => handleSelectTab(tab)}
+                  activeOpacity={0.8}
+                  accessibilityRole="tab"
+                  accessibilityLabel={tab.center ? 'Your Beer' : tab.label.replace('\n', ' ')}
+                  accessibilityState={{ selected: active }}
+                >
+                  {tab.center ? (
+                    <View style={[styles.logoCircle, active && styles.logoCircleActive]}>
+                      <Image source={HHS_LOGO} style={styles.logoImage} resizeMode="contain" />
+                    </View>
+                  ) : null}
+                  {tab.label ? (
+                    <Text
+                      style={[styles.tabText, tab.center && styles.centerTabText, active && styles.tabTextActive]}
+                      numberOfLines={2}
+                      allowFontScaling={false}
+                    >
+                      {tab.label}
+                    </Text>
+                  ) : null}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        ) : null}
         <Modal
           visible={settingsMenuVisible}
           transparent
@@ -207,7 +482,7 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
                     <Image source={HHS_LOGO} style={styles.menuLogoImage} resizeMode="contain" />
                   </View>
                   <Text style={styles.menuKicker}>Hallowed Hop Society</Text>
-                  <Text style={styles.menuTitle}>Membership and Notifications</Text>
+                  <Text style={styles.menuTitle}>The Settings</Text>
                   <Text style={styles.menuBody}>Choose a Society action.</Text>
 
                   <TouchableOpacity
@@ -222,12 +497,32 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.menuItem}
+                    onPress={openRoster}
+                    activeOpacity={0.78}
+                    accessibilityRole="button"
+                    accessibilityLabel="HHS Roster"
+                  >
+                    <Text style={styles.menuItemText}>HHS Roster</Text>
+                    <Text style={styles.menuChevron}>›</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.menuItem}
                     onPress={openAboutHhs}
                     activeOpacity={0.78}
                     accessibilityRole="button"
                     accessibilityLabel="About HHS"
                   >
                     <Text style={styles.menuItemText}>About HHS</Text>
+                    <Text style={styles.menuChevron}>›</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.menuItem}
+                    onPress={openInstagram}
+                    activeOpacity={0.78}
+                    accessibilityRole="link"
+                    accessibilityLabel="Instagram"
+                  >
+                    <Text style={styles.menuItemText}>Instagram</Text>
                     <Text style={styles.menuChevron}>›</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
@@ -254,6 +549,65 @@ function NativeAppShellContent({ fallback }: NativeAppShellProps) {
                   <Text style={styles.menuFooter}>
                     {HHS_WEB_ORIGIN.replace('https://', '')}
                   </Text>
+                </View>
+              </TouchableWithoutFeedback>
+            </View>
+          </TouchableWithoutFeedback>
+        </Modal>
+        <Modal
+          visible={notificationOnboardingVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => {
+            if (!notificationOnboardingBusy) void handleContinueWithoutNotifications();
+          }}
+          statusBarTranslucent
+        >
+          <TouchableWithoutFeedback
+            onPress={() => {
+              if (!notificationOnboardingBusy) void handleContinueWithoutNotifications();
+            }}
+          >
+            <View style={styles.onboardingBackdrop}>
+              <TouchableWithoutFeedback>
+                <View style={styles.onboardingCard}>
+              <Image source={HHS_LOGO} style={styles.onboardingLogo} resizeMode="contain" />
+              <Text style={styles.onboardingKicker}>Hallowed Hop Society</Text>
+              <Text style={styles.onboardingTitle}>Stay in the Loop</Text>
+              <Text style={styles.onboardingBody}>
+                Turn on notifications once and HHS will finish the setup for this phone, then open your beer for today.
+              </Text>
+              {notificationOnboardingMessage ? (
+                <Text style={styles.onboardingMessage}>{notificationOnboardingMessage}</Text>
+              ) : null}
+              {notificationOnboardingBusy ? (
+                <View style={styles.onboardingProgress}>
+                  <ActivityIndicator color={HHS_COLORS.gold} size="small" />
+                  <Text style={styles.onboardingProgressText}>Finishing notification setup…</Text>
+                </View>
+              ) : null}
+              <TouchableOpacity
+                activeOpacity={0.85}
+                disabled={notificationOnboardingBusy}
+                onPress={() => void handleEnableNotificationsFromOnboarding()}
+                style={[styles.onboardingPrimaryButton, notificationOnboardingBusy && styles.onboardingButtonDisabled]}
+                accessibilityRole="button"
+              >
+                <Text style={styles.onboardingPrimaryButtonText}>
+                  {notificationOnboardingBusy ? 'Setting Up…' : 'Turn On Notifications'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                disabled={notificationOnboardingBusy}
+                onPress={() => void handleContinueWithoutNotifications()}
+                style={styles.onboardingSecondaryButton}
+                accessibilityRole="button"
+              >
+                <Text style={styles.onboardingSecondaryButtonText}>
+                  {notificationOnboardingCanContinue ? 'Continue Without Notifications' : 'Not Now'}
+                </Text>
+              </TouchableOpacity>
                 </View>
               </TouchableWithoutFeedback>
             </View>
@@ -437,6 +791,103 @@ const styles = StyleSheet.create({
     opacity: 0.72,
     textAlign: 'center',
   },
+  onboardingBackdrop: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.74)',
+    flex: 1,
+    justifyContent: 'center',
+    padding: 22,
+  },
+  onboardingCard: {
+    backgroundColor: HHS_COLORS.card,
+    borderColor: HHS_COLORS.borderStrong,
+    borderRadius: 22,
+    borderWidth: 1,
+    gap: 14,
+    maxWidth: 430,
+    padding: 22,
+    width: '100%',
+  },
+  onboardingLogo: {
+    alignSelf: 'center',
+    height: 86,
+    marginBottom: -6,
+    width: 86,
+  },
+  onboardingKicker: {
+    ...HHS_TYPOGRAPHY.kicker,
+    color: HHS_COLORS.gold,
+    fontSize: 11,
+    textAlign: 'center',
+  },
+  onboardingTitle: {
+    ...HHS_TYPOGRAPHY.display,
+    color: HHS_COLORS.text,
+    fontSize: 30,
+    textAlign: 'center',
+  },
+  onboardingBody: {
+    ...HHS_TYPOGRAPHY.body,
+    color: HHS_COLORS.text,
+    fontSize: 16,
+    lineHeight: 24,
+    textAlign: 'center',
+  },
+  onboardingMessage: {
+    ...HHS_TYPOGRAPHY.body,
+    backgroundColor: HHS_COLORS.cardAlt,
+    borderColor: HHS_COLORS.border,
+    borderRadius: 12,
+    borderWidth: 1,
+    color: HHS_COLORS.muted,
+    fontSize: 14,
+    lineHeight: 20,
+    padding: 12,
+    textAlign: 'center',
+  },
+  onboardingProgress: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'center',
+  },
+  onboardingProgressText: {
+    ...HHS_TYPOGRAPHY.body,
+    color: HHS_COLORS.gold,
+    fontSize: 14,
+  },
+  onboardingPrimaryButton: {
+    alignItems: 'center',
+    backgroundColor: HHS_COLORS.gold,
+    borderRadius: HHS_STYLES.buttonRadius,
+    paddingHorizontal: 18,
+    paddingVertical: 15,
+  },
+  onboardingPrimaryButtonText: {
+    ...HHS_TYPOGRAPHY.button,
+    color: HHS_COLORS.background,
+    fontSize: 14,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  onboardingSecondaryButton: {
+    alignItems: 'center',
+    borderColor: HHS_COLORS.borderStrong,
+    borderRadius: HHS_STYLES.buttonRadius,
+    borderWidth: 1,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+  },
+  onboardingSecondaryButtonText: {
+    ...HHS_TYPOGRAPHY.button,
+    color: HHS_COLORS.text,
+    fontSize: 13,
+    letterSpacing: 0.9,
+    textTransform: 'uppercase',
+  },
+  onboardingButtonDisabled: {
+    opacity: 0.65,
+  },
   aboutScreen: {
     backgroundColor: HHS_COLORS.background,
     flex: 1,
@@ -472,4 +923,3 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
-

@@ -31,6 +31,32 @@ export type PushRegistrationSupport = {
   reason?: string;
 };
 
+function extractPushErrorMessage(raw: string) {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      error?: unknown;
+      message?: unknown;
+      details?: unknown;
+      reason?: unknown;
+    };
+    const candidate = [parsed.error, parsed.message, parsed.details, parsed.reason].find(
+      (value): value is string => typeof value === 'string' && value.trim().length > 0,
+    );
+    if (candidate) return candidate.trim();
+  } catch {
+    // Response was not JSON. Fall through to the raw text below.
+  }
+
+  return trimmed;
+}
+
+function isExpoPushToken(token: string | null | undefined) {
+  return Boolean(token?.startsWith('ExponentPushToken[') || token?.startsWith('ExpoPushToken['));
+}
+
 function getPushTokenStorageKey(user: PushRegistrationUser) {
   const userKey = (user.id || user.email || '').toLowerCase();
   return `${PUSH_TOKEN_STORAGE_PREFIX}:${Platform.OS}:${userKey}`;
@@ -163,16 +189,11 @@ function formatPushRegistrationError(error: unknown) {
   return message || 'Push registration failed.';
 }
 
-async function getPushTokenForCurrentPlatform(): Promise<{ token: string; provider: 'expo' | 'fcm' }> {
-  if (Platform.OS === 'android') {
-    const tokenData = await Notifications.getDevicePushTokenAsync();
-    const token = typeof tokenData.data === 'string' ? tokenData.data.trim() : '';
-    if (!token) {
-      throw new Error('Firebase Cloud Messaging did not return a device token for this Android device.');
-    }
-    return { token, provider: 'fcm' };
-  }
-
+async function getPushTokenForCurrentPlatform(): Promise<{ token: string; provider: 'expo' }> {
+  // HHS /api/push-token stores Expo push tokens and sends through Expo's push API.
+  // Android still uses FCM underneath, but Expo's native device-token API returns
+  // the raw FCM token, which the existing backend correctly rejects as non-Expo.
+  // Always register the Expo token so Android and iOS match the server contract.
   const tokenData = await Notifications.getExpoPushTokenAsync({
     projectId: HHS_EXPO_PROJECT_ID,
   });
@@ -233,6 +254,7 @@ export async function registerDeviceForPushNotifications(
 
     const cacheKey = getPushTokenStorageKey(pushUser);
     const cachedToken = await AsyncStorage.getItem(cacheKey).catch(() => null);
+    const previousExpoToken = isExpoPushToken(cachedToken) && cachedToken !== token ? cachedToken : undefined;
 
     const response = await fetch(`${HHS_WEB_ORIGIN}/api/push-token`, {
       method: 'POST',
@@ -246,8 +268,8 @@ export async function registerDeviceForPushNotifications(
         token,
         platform: Platform.OS,
         token_provider: provider,
-        token_type: provider === 'fcm' ? 'native' : 'expo',
-        previous_token: cachedToken && cachedToken !== token ? cachedToken : undefined,
+        token_type: 'expo',
+        previous_token: previousExpoToken,
       }),
     });
 
@@ -259,7 +281,9 @@ export async function registerDeviceForPushNotifications(
         token,
         provider,
         registered: false,
-        message: text || `Push token registration failed (${response.status}).`,
+        message:
+          extractPushErrorMessage(text) ||
+          `HHS could not finish notification setup right now (${response.status}). Please try again in a moment.`,
       };
     }
 
@@ -271,10 +295,7 @@ export async function registerDeviceForPushNotifications(
       provider,
       registered: true,
       skipped: cachedToken === token,
-      message:
-        provider === 'fcm'
-          ? 'This Android device is registered directly with Firebase Cloud Messaging.'
-          : 'This device is registered for push notifications.',
+      message: 'This device is registered for push notifications.',
     };
   } catch (error) {
     return {

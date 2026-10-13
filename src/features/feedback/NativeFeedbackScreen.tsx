@@ -15,6 +15,7 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
+  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -190,7 +191,8 @@ function SuggestionFormModal({ visible, userEmail, onClose, onSuccess }: Suggest
         style={styles.modalBg}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <View style={styles.modalSheet}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={handleClose} />
+        <Pressable style={styles.modalSheet} onPress={(event) => event.stopPropagation()}>
           {/* Handle — sits outside the scroll so it stays pinned at the top */}
           <View style={styles.modalHandle} />
 
@@ -261,7 +263,7 @@ function SuggestionFormModal({ visible, userEmail, onClose, onSuccess }: Suggest
               <Text style={styles.cancelButtonText}>Cancel</Text>
             </TouchableOpacity>
           </ScrollView>
-        </View>
+        </Pressable>
       </KeyboardAvoidingView>
     </Modal>
   );

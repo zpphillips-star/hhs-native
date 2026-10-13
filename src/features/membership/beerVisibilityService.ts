@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { supabase } from '../../lib/supabase';
 
@@ -26,6 +27,28 @@ type ProfilePreferenceRow = {
 };
 
 const MISSING_COLUMN_CODES = new Set(['42703', 'PGRST200', 'PGRST202', 'PGRST204']);
+
+function getBeerVisibilityPreferenceStorageKey(userId: string) {
+  return `@hhs:beer-visibility-preference:${userId}`;
+}
+
+async function loadLocalBeerVisibilityPreference(userId: string): Promise<BeerVisibilityPreference | null> {
+  try {
+    const raw = await AsyncStorage.getItem(getBeerVisibilityPreferenceStorageKey(userId));
+    return normalizeBeerVisibilityPreference(raw);
+  } catch (err) {
+    console.warn('[HHS beer visibility] failed to load local preference:', err);
+    return null;
+  }
+}
+
+async function saveLocalBeerVisibilityPreference(userId: string, preference: BeerVisibilityPreference): Promise<void> {
+  try {
+    await AsyncStorage.setItem(getBeerVisibilityPreferenceStorageKey(userId), preference);
+  } catch (err) {
+    console.warn('[HHS beer visibility] failed to save local preference:', err);
+  }
+}
 
 export function normalizeMembershipTier(tier: string | null | undefined): MembershipTier {
   const normalized = (tier ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '');
@@ -97,14 +120,15 @@ export async function fetchBeerVisibilityPreference(
   if (error) {
     if (isMissingPreferenceColumnError(error)) {
       console.warn('[HHS beer visibility] profiles.beer_visibility_preference is unavailable; using safe defaults.');
-      return { preference: null, columnAvailable: false };
+      return { preference: await loadLocalBeerVisibilityPreference(userId), columnAvailable: false };
     }
     throw new Error(error.message);
   }
 
   const row = (data ?? null) as ProfilePreferenceRow | null;
+  const remotePreference = normalizeBeerVisibilityPreference(row?.beer_visibility_preference);
   return {
-    preference: normalizeBeerVisibilityPreference(row?.beer_visibility_preference),
+    preference: remotePreference ?? (await loadLocalBeerVisibilityPreference(userId)),
     columnAvailable: true,
   };
 }
@@ -168,6 +192,8 @@ export async function saveBeerVisibilityPreference(
   userId: string,
   preference: BeerVisibilityPreference,
 ): Promise<void> {
+  await saveLocalBeerVisibilityPreference(userId, preference);
+
   if (!supabase) {
     throw new Error('Supabase public env is not configured for the native app.');
   }
@@ -179,9 +205,8 @@ export async function saveBeerVisibilityPreference(
 
   if (error) {
     if (isMissingPreferenceColumnError(error)) {
-      throw new Error(
-        'profiles.beer_visibility_preference is missing in Supabase. Add it before this setting can be saved.',
-      );
+      console.warn('[HHS beer visibility] profiles.beer_visibility_preference is unavailable; saved preference locally.');
+      return;
     }
     throw new Error(error.message);
   }

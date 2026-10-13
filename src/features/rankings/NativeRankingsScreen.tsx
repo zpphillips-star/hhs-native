@@ -3,7 +3,7 @@
  *
  * Layout:
  *   • Page header: "The Society Standings" + subheading
- *   • Two top-tabs: "Top Beers" | "Members"
+ *   • Three top-tabs: "Top Beers" | "My Beers" | "Members"
  *   • Top Beers tab: real Supabase leaderboard — medal/rank, beer name,
  *     brewery + Day N, star display, avg + count; #1 row gets a gold tint.
  *   • Members tab: auth gate → sign-in CTA if logged out; when signed in,
@@ -26,15 +26,24 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../auth/AuthProvider';
 import { HHS_COLORS, HHS_STYLES, HHS_TYPOGRAPHY } from '../../theme/hhsTheme';
-import { fetchTopBeers, type RankedBeer } from './rankingsService';
+import { fetchMyBeerRatings, fetchTopBeers, type MyBeerRatingsResult, type MyBeerRatingRow, type RankedBeer } from './rankingsService';
 import { fetchRankedMembers, type RankedMember } from './membersService';
 import { canSeeAllBeers, useBeerVisibility } from '../membership/beerVisibilityService';
+import { loadRankingsDisplayPreferences } from './rankingsPreferences';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type RankingsTab = 'topBeers' | 'members';
+type RankingsTab = 'topBeers' | 'myBeers' | 'members';
 
 type LoadState = 'idle' | 'loading' | 'empty' | 'error';
+
+type MyBeerSortMode = 'day' | 'lowest' | 'highest';
+
+const MY_BEER_SORT_OPTIONS: readonly { id: MyBeerSortMode; label: string }[] = [
+  { id: 'day', label: 'Day' },
+  { id: 'lowest', label: 'Lowest' },
+  { id: 'highest', label: 'Highest' },
+];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -51,6 +60,10 @@ function starsDisplay(avg: number): string {
   return '★'.repeat(filled) + '☆'.repeat(5 - filled);
 }
 
+function formatAverage(value: number | null): string {
+  return value === null ? '—' : value.toFixed(1);
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export type NativeRankingsScreenProps = {
@@ -61,11 +74,19 @@ export type NativeRankingsScreenProps = {
 export function NativeRankingsScreen({ onOpenAuth }: NativeRankingsScreenProps) {
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<RankingsTab>('topBeers');
+  const [showMyBeersInRankings, setShowMyBeersInRankings] = useState(true);
 
   // ── Top Beers state ──
   const [topBeersLoadState, setTopBeersLoadState] = useState<LoadState>('idle');
   const [topBeers, setTopBeers] = useState<RankedBeer[]>([]);
   const [topBeersError, setTopBeersError] = useState<string | null>(null);
+
+  // ── My Beers state ──
+  const [myBeersLoadState, setMyBeersLoadState] = useState<LoadState>('idle');
+  const [myBeersResult, setMyBeersResult] = useState<MyBeerRatingsResult | null>(null);
+  const [myBeersError, setMyBeersError] = useState<string | null>(null);
+  const [myBeersAttempted, setMyBeersAttempted] = useState(false);
+  const [myBeerSortMode, setMyBeerSortMode] = useState<MyBeerSortMode>('day');
 
   // ── Members state ──
   const [membersLoadState, setMembersLoadState] = useState<LoadState>('idle');
@@ -84,6 +105,39 @@ export function NativeRankingsScreen({ onOpenAuth }: NativeRankingsScreenProps) 
     return topBeers;
   }, [beerVisibility, topBeers]);
   const showOddballsTopBeersExplainer = beerVisibility.tier === 'oddballs' && !canSeeAllBeers(beerVisibility);
+  const sortedMyBeerRows = useMemo(() => {
+    const rows = [...(myBeersResult?.rows ?? [])];
+    if (myBeerSortMode === 'lowest') {
+      return rows.sort((a, b) => a.userStars - b.userStars || a.beer.day_number - b.beer.day_number);
+    }
+    if (myBeerSortMode === 'highest') {
+      return rows.sort((a, b) => b.userStars - a.userStars || a.beer.day_number - b.beer.day_number);
+    }
+    return rows.sort((a, b) => a.beer.day_number - b.beer.day_number);
+  }, [myBeerSortMode, myBeersResult?.rows]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    loadRankingsDisplayPreferences(user?.id)
+      .then((preferences) => {
+        if (cancelled) return;
+        setShowMyBeersInRankings(preferences.showMyBeersInRankings);
+        if (!preferences.showMyBeersInRankings) {
+          setActiveTab((currentTab) => (currentTab === 'myBeers' ? 'topBeers' : currentTab));
+        }
+      })
+      .catch((err) => {
+        console.warn(
+          '[HHS Rankings] failed to load Rankings display preferences:',
+          err instanceof Error ? err.message : err,
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   // Load top beers on mount
   const loadTopBeers = useCallback(async () => {
@@ -105,6 +159,31 @@ export function NativeRankingsScreen({ onOpenAuth }: NativeRankingsScreenProps) 
     void loadTopBeers();
   }, [loadTopBeers]);
 
+  const loadMyBeers = useCallback(async () => {
+    if (!user?.id) {
+      setMyBeersResult(null);
+      setMyBeersError(null);
+      setMyBeersLoadState('idle');
+      setMyBeersAttempted(false);
+      return;
+    }
+
+    setMyBeersLoadState('loading');
+    setMyBeersError(null);
+    try {
+      const result = await fetchMyBeerRatings(user.id);
+      setMyBeersResult(result);
+      setMyBeersLoadState(result.rows.length === 0 ? 'empty' : 'idle');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      console.warn('[HHS Rankings] fetchMyBeerRatings failed:', msg);
+      setMyBeersError(msg);
+      setMyBeersLoadState('error');
+    } finally {
+      setMyBeersAttempted(true);
+    }
+  }, [user?.id]);
+
   // Load members when user is authenticated and members tab becomes active
   const loadMembers = useCallback(async () => {
     setMembersLoadState('loading');
@@ -124,11 +203,21 @@ export function NativeRankingsScreen({ onOpenAuth }: NativeRankingsScreenProps) 
   }, []);
 
   useEffect(() => {
+    setMyBeersResult(null);
+    setMyBeersError(null);
+    setMyBeersLoadState('idle');
+    setMyBeersAttempted(false);
     setMembers([]);
     setMembersError(null);
     setMembersLoadState('idle');
     setMembersAttempted(false);
   }, [user?.id]);
+
+  useEffect(() => {
+    if (activeTab === 'myBeers' && user?.id && !myBeersAttempted && myBeersLoadState !== 'loading') {
+      void loadMyBeers();
+    }
+  }, [activeTab, user?.id, myBeersAttempted, myBeersLoadState, loadMyBeers]);
 
   // Auto-load members when a logged-in user switches to the Members tab
   useEffect(() => {
@@ -141,11 +230,13 @@ export function NativeRankingsScreen({ onOpenAuth }: NativeRankingsScreenProps) 
     setRefreshing(true);
     if (activeTab === 'topBeers') {
       await loadTopBeers();
+    } else if (activeTab === 'myBeers') {
+      await loadMyBeers();
     } else {
       await loadMembers();
     }
     setRefreshing(false);
-  }, [activeTab, loadTopBeers, loadMembers]);
+  }, [activeTab, loadTopBeers, loadMyBeers, loadMembers]);
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
@@ -167,6 +258,17 @@ export function NativeRankingsScreen({ onOpenAuth }: NativeRankingsScreenProps) 
             Top Beers
           </Text>
         </TouchableOpacity>
+        {showMyBeersInRankings ? (
+          <TouchableOpacity
+            style={[styles.tabPill, activeTab === 'myBeers' && styles.tabPillActive]}
+            onPress={() => setActiveTab('myBeers')}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.tabPillText, activeTab === 'myBeers' && styles.tabPillTextActive]}>
+              My Beers
+            </Text>
+          </TouchableOpacity>
+        ) : null}
         <TouchableOpacity
           style={[styles.tabPill, activeTab === 'members' && styles.tabPillActive]}
           onPress={() => setActiveTab('members')}
@@ -187,6 +289,18 @@ export function NativeRankingsScreen({ onOpenAuth }: NativeRankingsScreenProps) 
           refreshing={refreshing}
           showOddballsExplainer={showOddballsTopBeersExplainer}
           onRefresh={() => void onRefresh()}
+        />
+      ) : activeTab === 'myBeers' && showMyBeersInRankings ? (
+        <MyBeersTab
+          loadState={myBeersLoadState}
+          rows={sortedMyBeerRows}
+          summary={myBeersResult?.summary ?? null}
+          sortMode={myBeerSortMode}
+          errorMessage={myBeersError}
+          refreshing={refreshing}
+          onChangeSortMode={setMyBeerSortMode}
+          onRefresh={() => void onRefresh()}
+          onOpenAuth={onOpenAuth}
         />
       ) : (
         <MembersTab
@@ -318,6 +432,167 @@ function BeerRankingRow({ item }: { item: RankedBeer }) {
             {item.avgStars.toFixed(1)} · {item.ratingCount} {item.ratingCount === 1 ? 'rating' : 'ratings'}
           </Text>
         </View>
+      </View>
+    </View>
+  );
+}
+
+// ─── My Beers tab ──────────────────────────────────────────────────────────────
+
+function MyBeersTab({
+  loadState,
+  rows,
+  summary,
+  sortMode,
+  errorMessage,
+  refreshing,
+  onChangeSortMode,
+  onRefresh,
+  onOpenAuth,
+}: {
+  loadState: LoadState;
+  rows: MyBeerRatingRow[];
+  summary: MyBeerRatingsResult['summary'] | null;
+  sortMode: MyBeerSortMode;
+  errorMessage: string | null;
+  refreshing: boolean;
+  onChangeSortMode: (mode: MyBeerSortMode) => void;
+  onRefresh: () => void;
+  onOpenAuth: () => void;
+}) {
+  const { user, loading } = useAuth();
+
+  if (!loading && !user) {
+    return (
+      <View style={styles.authGate}>
+        <Text style={styles.emptyIcon}>🔒</Text>
+        <Text style={styles.emptyTitle}>Members Only</Text>
+        <Text style={styles.emptyBody}>
+          Sign in to see your beer ratings beside the Society average.
+        </Text>
+        <TouchableOpacity style={styles.signInButton} onPress={onOpenAuth} activeOpacity={0.82}>
+          <Text style={styles.signInButtonText}>Sign In</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (loading) {
+    return (
+      <View style={styles.centerBox}>
+        <ActivityIndicator size="large" color={HHS_COLORS.gold} />
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView
+      style={styles.tabContent}
+      contentContainerStyle={styles.tabContentInner}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={HHS_COLORS.gold} />}
+    >
+      {loadState === 'loading' && (
+        <View style={styles.centerBox}>
+          <ActivityIndicator size="large" color={HHS_COLORS.gold} />
+          <Text style={styles.statusText}>Loading your beers…</Text>
+        </View>
+      )}
+      {loadState === 'error' && (
+        <View style={styles.centerBox}>
+          <Text style={styles.errorText}>Couldn&apos;t load your beer ratings.</Text>
+          {errorMessage ? (
+            <Text style={styles.errorDetail}>{errorMessage}</Text>
+          ) : null}
+          <Text style={styles.statusText}>Pull down to try again.</Text>
+        </View>
+      )}
+      {loadState === 'empty' && (
+        <View style={styles.centerBox}>
+          <Text style={styles.emptyIcon}>🍻</Text>
+          <Text style={styles.emptyTitle}>No Ratings Yet</Text>
+          <Text style={styles.emptyBody}>
+            Rate a beer from Your Beer or the Calendar, then come back here to compare your score with the
+            Society average.
+          </Text>
+        </View>
+      )}
+      {loadState === 'idle' && (
+        <>
+          <View style={styles.myBeersSummaryCard}>
+            <View style={styles.summaryStatsRow}>
+              <View style={styles.summaryStat}>
+                <Text style={styles.summaryValue}>{formatAverage(summary?.userAverageStars ?? null)}</Text>
+                <Text style={styles.summaryLabel}>
+                  Your avg · {summary?.userRatingCount ?? 0} rated
+                </Text>
+              </View>
+              <View style={styles.summaryDivider} />
+              <View style={styles.summaryStat}>
+                <Text style={styles.summaryValue}>{formatAverage(summary?.societyAverageStars ?? null)}</Text>
+                <Text style={styles.summaryLabel}>
+                  Society avg · {summary?.societyRatingCount ?? 0} ratings
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.sortRow}>
+            {MY_BEER_SORT_OPTIONS.map((option) => {
+              const active = sortMode === option.id;
+              return (
+                <TouchableOpacity
+                  key={option.id}
+                  activeOpacity={0.84}
+                  onPress={() => onChangeSortMode(option.id)}
+                  style={[styles.sortPill, active && styles.sortPillActive]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                >
+                  <Text style={[styles.sortPillText, active && styles.sortPillTextActive]}>
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <View style={styles.myBeersHeaderRow}>
+            <Text style={[styles.myBeersColumnHeader, styles.myBeersBeerHeader]}>Beer</Text>
+            <Text style={styles.myBeersColumnHeader}>You</Text>
+            <Text style={styles.myBeersColumnHeader}>Society</Text>
+          </View>
+
+          <View style={styles.leaderboard}>
+            {rows.map((item) => (
+              <MyBeerRatingRowView key={item.beer.id} item={item} />
+            ))}
+          </View>
+        </>
+      )}
+    </ScrollView>
+  );
+}
+
+function MyBeerRatingRowView({ item }: { item: MyBeerRatingRow }) {
+  return (
+    <View style={styles.myBeerRow}>
+      <View style={styles.myBeerInfo}>
+        <Text style={styles.beerName} numberOfLines={1}>
+          {item.beer.name}
+        </Text>
+        <Text style={styles.beerMeta} numberOfLines={1}>
+          {item.beer.brewery} · Day {item.beer.day_number}
+        </Text>
+      </View>
+      <View style={styles.myBeerRatingCell}>
+        <Text style={styles.myBeerRatingValue}>{item.userStars.toFixed(1)}</Text>
+        <Text style={styles.myBeerRatingLabel}>you</Text>
+      </View>
+      <View style={styles.myBeerRatingCell}>
+        <Text style={styles.myBeerRatingValue}>{formatAverage(item.societyAvgStars)}</Text>
+        <Text style={styles.myBeerRatingLabel}>
+          {item.societyRatingCount} {item.societyRatingCount === 1 ? 'vote' : 'votes'}
+        </Text>
       </View>
     </View>
   );
@@ -625,6 +900,116 @@ const styles = StyleSheet.create({
     color: HHS_COLORS.muted,
     fontSize: 13,
     lineHeight: 20,
+  },
+  myBeersSummaryCard: {
+    backgroundColor: 'rgba(217, 124, 43, 0.10)',
+    borderColor: HHS_COLORS.border,
+    borderRadius: HHS_STYLES.cardRadius,
+    borderWidth: 1,
+    marginBottom: 12,
+    padding: 14,
+  },
+  summaryStatsRow: {
+    alignItems: 'stretch',
+    flexDirection: 'row',
+    gap: 12,
+  },
+  summaryStat: {
+    flex: 1,
+    gap: 4,
+  },
+  summaryValue: {
+    ...HHS_TYPOGRAPHY.display,
+    color: HHS_COLORS.goldLight,
+    fontSize: 28,
+    lineHeight: 32,
+  },
+  summaryLabel: {
+    ...HHS_TYPOGRAPHY.body,
+    color: HHS_COLORS.muted,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  summaryDivider: {
+    backgroundColor: HHS_COLORS.border,
+    width: 1,
+  },
+  sortRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  sortPill: {
+    alignItems: 'center',
+    borderColor: HHS_COLORS.border,
+    borderRadius: HHS_STYLES.pillRadius,
+    borderWidth: 1,
+    flex: 1,
+    paddingVertical: 8,
+  },
+  sortPillActive: {
+    backgroundColor: HHS_COLORS.goldDim,
+    borderColor: HHS_COLORS.borderStrong,
+  },
+  sortPillText: {
+    ...HHS_TYPOGRAPHY.body,
+    color: HHS_COLORS.muted,
+    fontSize: 12,
+  },
+  sortPillTextActive: {
+    color: HHS_COLORS.gold,
+  },
+  myBeersHeaderRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 8,
+    paddingHorizontal: 10,
+  },
+  myBeersColumnHeader: {
+    ...HHS_TYPOGRAPHY.kicker,
+    color: HHS_COLORS.muted,
+    fontSize: 10,
+    letterSpacing: 1.4,
+    minWidth: 58,
+    textAlign: 'center',
+    textTransform: 'uppercase',
+  },
+  myBeersBeerHeader: {
+    flex: 1,
+    minWidth: 0,
+    textAlign: 'left',
+  },
+  myBeerRow: {
+    alignItems: 'center',
+    backgroundColor: HHS_COLORS.card,
+    borderColor: HHS_COLORS.border,
+    borderRadius: HHS_STYLES.cardRadius,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    padding: 14,
+  },
+  myBeerInfo: {
+    flex: 1,
+    gap: 3,
+    minWidth: 0,
+  },
+  myBeerRatingCell: {
+    alignItems: 'center',
+    minWidth: 58,
+  },
+  myBeerRatingValue: {
+    ...HHS_TYPOGRAPHY.display,
+    color: HHS_COLORS.gold,
+    fontSize: 20,
+    lineHeight: 24,
+  },
+  myBeerRatingLabel: {
+    ...HHS_TYPOGRAPHY.body,
+    color: HHS_COLORS.muted,
+    fontSize: 10,
+    lineHeight: 13,
+    textAlign: 'center',
   },
   rankRow: {
     backgroundColor: HHS_COLORS.card,

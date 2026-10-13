@@ -97,8 +97,8 @@ android {
         applicationId 'com.zplotindustries.hallowedhopsociety'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 148
-        versionName "1.0.148"
+        versionCode 149
+        versionName "1.0.149"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -212,16 +212,3 @@ dependencies {
         implementation jscFlavor
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
